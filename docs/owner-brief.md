@@ -37,6 +37,7 @@
 5. 勾选 **Require a pull request before merging**（"Required approvals" 保持 0：你不能批准自己的 PR，合并本身就是你的批准）。
 6. 勾选 **Require status checks to pass**，再勾选 **Require branches to be up to date before merging**；点 **Add checks**，搜索并加入 `tests`。
    `rules` 第一次搜不到是正常的：GitHub 只列出在仓库里跑过的检查，而 `rules` 要等 G0 合并之后的第一个 PR 才第一次运行。那个 PR 打开、检查跑完之后，回到这里点 **Add checks** 加入 `rules`，再点 **Save changes**。
+   **两个检查的来源都要选 GitHub Actions**，不要选 claude、cursor、kiro 等其他应用。来源选错了，检查永远等不到结果，所有 PR 都会合并不了。
 7. 点 **Create**。
 
 **C. 打开推送保护**
