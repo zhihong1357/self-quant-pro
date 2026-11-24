@@ -1,0 +1,40 @@
+# 研究宇宙 U1。继承自第二代 finance-research：决策 0007（宇宙定义）、决策 0015（分段边界），
+# 边界记录 B-0001（2026-11-15T21:09:02Z 写入）。本文件受冻结保护，边界永远不移动。
+
+id = "U1"
+name = "加密货币 USDT 永续合约（广度优先）"
+domain = "crypto"
+scope = "Binance 与 Bybit 的全部 USDT 永续合约，包括已下架品种；具体品种池由数据层按时点规则生成"
+inherited_from = "finance-research 决策 0007、0015；registry/boundaries.jsonl 的 B-0001"
+created = 2026-11-15
+
+[segments.exploration]
+start = 2019-12-01
+end = 2024-01-31
+
+[segments.confirmation]
+start = 2024-02-01
+end = 2025-10-31
+
+[segments.vault]
+start = 2025-11-01
+end = 2026-10-31
+
+[segments.forward]
+start = 2026-11-01
+
+# 第二代 myquant 用到了截至 2026-11 的加密数据（明细见 registry/inherited/trials.json），
+# 覆盖了确认集和金库。对下面这些假说族，确认集和金库不再算"没见过的数据"，
+# 只有 burned_through 之后产生的前向数据才算。`sqp check` 会核对这里没有漏报。
+[exposure]
+families_burned = [
+  "crypto.cross-asset-transmission",
+  "crypto.implied-vol",
+  "crypto.macro-event-windows",
+  "crypto.options-expiry",
+  "macro.publication-lag",
+  # 没有试验记录、但看过数据的探索（myquant 的 microstructure-4a/4b、funding-history），按最坏情况算
+  "crypto.microstructure",
+  "crypto.funding",
+]
+burned_through = 2026-11-19

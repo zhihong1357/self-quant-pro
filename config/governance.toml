@@ -1,0 +1,71 @@
+# 治理检查（`sqp check`）的配置。规则说明见 docs/architecture.md 第 5 节。
+# 本文件受冻结保护：合并进 main 之后，修改它必须在同一个 PR 新增决策记录，正文写明 config/governance.toml。
+# 路径一律用正斜杠；匹配规则里的 "*" 可以跨目录。
+
+[stage]
+file = "STAGE"
+order = ["G0", "G1", "G2", "G3", "G4", "G5", "G6", "G7", "G8"]
+order_code_allowed_from = "G7"
+
+[code]
+# 当作代码扫描的扩展名
+extensions = [
+  ".py", ".pyi", ".ipynb", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx",
+  ".sh", ".bash", ".zsh", ".ps1", ".go", ".rs", ".java", ".kt", ".cs",
+  ".rb", ".php", ".sql", ".yml", ".yaml",
+]
+# G7 之前不允许出现：下单、撤单、改单，以及交易所签名用的凭证
+order_patterns = [
+  { name = "下单/撤单/改单函数", regex = '(?i)\b(create|place|submit|send|post|cancel|amend|edit|modify|replace)_?(limit_|market_|stop_|batch_)?orders?\b' },
+  { name = "交易所下单接口路径", regex = '(?i)/(api|fapi|dapi|papi|eapi)/v\d+/(order|batchOrders|allOpenOrders)\b' },
+  { name = "交易所下单接口路径（v5）", regex = '(?i)/v5/order/' },
+  { name = "交易签名用的凭证", regex = '(?i)\b(api_?secret|secret_?key|private_?key|passphrase)\b' },
+]
+# 任何阶段都不允许出现：提币、资金划转
+never_patterns = [
+  { name = "提币", regex = '(?i)withdraw' },
+  { name = "账户间划转", regex = '(?i)\b(universal|internal|sub_?account|asset)_?transfer\b' },
+  { name = "划转接口路径", regex = '(?i)/(sapi|api)/v\d+/(asset/transfer|capital/)' },
+]
+
+[files]
+max_bytes = 1_000_000
+data_extensions = [
+  ".csv", ".tsv", ".parquet", ".feather", ".arrow", ".ipc", ".orc", ".avro",
+  ".h5", ".hdf5", ".nc", ".npy", ".npz", ".pkl", ".pickle", ".joblib",
+  ".db", ".sqlite", ".sqlite3", ".duckdb", ".xlsx", ".xls",
+  ".zip", ".gz", ".tgz", ".bz2", ".xz", ".zst", ".7z", ".rar", ".tar",
+]
+fixture_dirs = ["tests/fixtures/"]
+secret_file_globs = [
+  ".env", ".env.*", "*/.env", "*/.env.*",
+  "*.pem", "*.key", "*.p12", "*.pfx", "*.jks", "*.keystore", "*.kdbx",
+  "id_rsa*", "*/id_rsa*", "id_ed25519*", "*/id_ed25519*",
+  "*credentials*.json", "*service-account*.json", "*service_account*.json",
+  "client_secret*.json", "*/client_secret*.json",
+]
+secret_file_allow = [".env.example"]
+
+[secrets]
+patterns = [
+  { name = "Google API 密钥（含 AI Studio / Gemini）", regex = 'AIza[0-9A-Za-z_\-]{35}' },
+  { name = "Google OAuth 客户端密钥", regex = 'GOCSPX-[0-9A-Za-z_\-]{20,}' },
+  { name = "谷歌云服务账号私钥", regex = '"private_key_id"\s*:\s*"[0-9a-f]{40}"' },
+  { name = "PEM 私钥", regex = '-----BEGIN (?:[A-Z]+ )*PRIVATE KEY-----' },
+  { name = "GitHub 令牌", regex = '\bgh[pousr]_[0-9A-Za-z]{36,}\b' },
+  { name = "GitHub 细粒度令牌", regex = '\bgithub_pat_[0-9A-Za-z_]{50,}\b' },
+  { name = "AWS 访问密钥", regex = '\bAKIA[0-9A-Z]{16}\b' },
+  { name = "Slack 令牌", regex = '\bxox[abposr]-[0-9A-Za-z-]{10,}' },
+  { name = "OpenAI / Anthropic 风格的密钥", regex = '\bsk-(?:ant-|proj-)?[A-Za-z0-9_\-]{32,}' },
+  { name = "Telegram 机器人令牌", regex = '\b\d{8,10}:[A-Za-z0-9_\-]{35}\b' },
+  { name = "写死在代码里的密钥", regex = '''(?i)\b(api[_-]?key|api[_-]?secret|secret[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|passphrase|password)\b["']?\s*[:=]\s*["'][^"'\s]{16,}["']''' },
+]
+
+[history]
+ledger_globs = ["registry/ledger/*.jsonl"]
+frozen_globs = ["registry/inherited/*", "registry/universes/*", "config/*", ".github/workflows/*"]
+no_delete_globs = ["registry/*", "docs/decisions/*", "config/*", ".github/workflows/*", "STAGE", "AGENTS.md"]
+decisions_dir = "docs/decisions"
+hypotheses_glob = "registry/hypotheses/*.toml"
+universes_glob = "registry/universes/*.toml"
+inherited_trials = "registry/inherited/trials.json"

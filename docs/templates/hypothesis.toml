@@ -1,0 +1,38 @@
+# 假说卡模板。复制到 registry/hypotheses/H-NNNN.toml，编号接着往下排。
+# 草稿可以随便改；注册（status 改成 "registered"）之后，除 status 和 status_history 外全部冻结。
+
+id = "H-0000"
+title = "一句话：在什么条件下，什么会发生"
+family = "crypto.example"      # 假说族：机制相同的假说用同一个族名，共享试验计数和暴露
+universe = "U1"                # 研究宇宙，见 registry/universes/
+status = "draft"               # draft → registered → confirmed / inconclusive / rejected → retired
+created = 2026-11-24
+
+mechanism = "为什么会这样：一个说得清楚的因果故事"
+counterparty = "谁在付钱：这笔钱从谁的口袋里来"
+why_persistent = "为什么会一直付：什么约束让对方无法停止"
+why_us = "为什么轮到我们：大机构为什么没有把它做完（容量太小、限制、太慢）"
+predictions = [
+  "主要预测：会看到什么",
+  "机制的其他推论：如果机制为真，还应当看到什么",
+]
+falsification = "什么结果算否定"
+prior = 0.2                    # 事先认为它成立的概率
+
+# ---- 以下注册时填写，注册后冻结 ----
+# [registration]
+# registered_at = 2026-12-01
+# segments = ["confirmation"]
+# min_effect_sharpe = 1.5      # 事先认为合理的最小年化夏普；先跑 sqp power 看门槛
+# test_plan = "冻结的检验方案：指标、检验方法、数据段、成本假设"
+# mechanism_exception = ""     # 只有想把 t 门槛降到 2.5 时才写：为什么机制足够明确
+#
+# [thresholds]                 # 只能比 config/protocol.toml 更严
+# t_stat = 3.0
+# deflated_sharpe = 0.95
+# pbo = 0.10
+# cost_multiplier = 2.0
+#
+# [scope]
+# horizon = "1d"
+# instruments = "U1 全部品种"

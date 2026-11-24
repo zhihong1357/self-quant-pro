@@ -1,0 +1,440 @@
+{
+  "note": "由 sqp inherit scan 生成，不要手改。data.first/last 是试验结果里出现过的日期范围（启发式，偏保守），last 不晚于记录时间。counted 表示计入多重检验的试验次数。",
+  "records": [
+    {
+      "counted": false,
+      "data": {
+        "first": "2011-12-31",
+        "last": "2011-12-31"
+      },
+      "domain": "synthetic",
+      "family": "finance-research.H-0001",
+      "fingerprint": "sha256:c4defa6f91e63938bf6f61fc48f860773e8fa84543fa54a9db0d317287dd9deb",
+      "hypothesis_id": "H-0001",
+      "recorded_at": "2026-11-13T05:01:33.416202Z",
+      "segment": "exploration",
+      "source": "finance-research",
+      "status": "completed",
+      "study": "H-0001",
+      "trial_id": "T-000001"
+    },
+    {
+      "counted": true,
+      "data": {
+        "first": "2021-03-24",
+        "last": "2026-11-19"
+      },
+      "domain": "crypto",
+      "family": "crypto.implied-vol",
+      "fingerprint": "302631f465211abdf1804f48eb12cc17168755ad02fceb9cf1052f0e47954cf4",
+      "hypothesis_id": "H0018",
+      "recorded_at": "2026-11-19T17:20:11.970555+00:00",
+      "source": "myquant",
+      "status": "completed",
+      "study": "btc-dvol-013",
+      "trial_id": "T0021"
+    },
+    {
+      "counted": true,
+      "data": {
+        "first": "2023-01-02",
+        "last": "2026-11-18"
+      },
+      "domain": "crypto",
+      "family": "crypto.cross-asset-transmission",
+      "fingerprint": "7cf678cdaffae790217827a2b3c3c7b5ab27231972f27edb9407bb1229c8dd1d",
+      "hypothesis_id": "H0001",
+      "recorded_at": "2026-11-18T00:58:34.879586+00:00",
+      "source": "myquant",
+      "status": "completed",
+      "study": "btc-eth-001",
+      "trial_id": "T0001"
+    },
+    {
+      "counted": true,
+      "data": {
+        "first": "2003-01-02",
+        "last": "2026-11-19"
+      },
+      "domain": "tradfi",
+      "family": "tradfi.credit-spread-lead",
+      "fingerprint": "6b87286c14dd70b572665cda0e1dac85b2888f6d3fb9b70d3bd2c290c2b7ad13",
+      "hypothesis_id": "H0017",
+      "recorded_at": "2026-11-19T15:41:10.434909+00:00",
+      "source": "myquant",
+      "status": "completed",
+      "study": "credit-spread-dgs10-012",
+      "trial_id": "T0020"
+    },
+    {
+      "counted": true,
+      "data": {
+        "first": "2003-01-02",
+        "last": "2026-11-18"
+      },
+      "domain": "tradfi",
+      "family": "tradfi.credit-spread-lead",
+      "fingerprint": "5e2ca06ab5c3c417df84dac18f71e435ec10114411c1c867d4beb10d98426170",
+      "hypothesis_id": "H0013",
+      "recorded_at": "2026-11-19T00:28:28.799331+00:00",
+      "source": "myquant",
+      "status": "completed",
+      "study": "credit-spread-spx-008",
+      "trial_id": "T0016"
+    },
+    {
+      "counted": true,
+      "data": {
+        "first": "2003-01-02",
+        "last": "2020-05-16"
+      },
+      "domain": "tradfi",
+      "family": "tradfi.credit-spread-lead",
+      "fingerprint": "4daa54ed5167d4644bbe65ebcff4ef10d5a53cd3ac85c9361e8eaf3e5813d7c5",
+      "hypothesis_id": "H0014",
+      "recorded_at": "2026-11-19T02:07:50.902773+00:00",
+      "source": "myquant",
+      "status": "completed",
+      "study": "credit-spread-tyvix-009",
+      "trial_id": "T0017"
+    },
+    {
+      "counted": true,
+      "data": {
+        "first": "2003-01-02",
+        "last": "2026-11-19"
+      },
+      "domain": "tradfi",
+      "family": "tradfi.credit-spread-lead",
+      "fingerprint": "f97982756713de749850358a86a51e788bc134401ff3e24ef808dd6c4e7c8a2a",
+      "hypothesis_id": "H0015",
+      "recorded_at": "2026-11-19T02:55:55.812776+00:00",
+      "source": "myquant",
+      "status": "completed",
+      "study": "credit-spread-vix-010",
+      "trial_id": "T0018"
+    },
+    {
+      "counted": true,
+      "data": {
+        "first": "2003-01-02",
+        "last": "2026-11-19"
+      },
+      "domain": "tradfi",
+      "family": "tradfi.credit-spread-lead",
+      "fingerprint": "44686089ef56366aed448d23b43672a4dd868504511cd10be788a5f5b8228be4",
+      "hypothesis_id": "H0016",
+      "recorded_at": "2026-11-19T03:54:43.688700+00:00",
+      "source": "myquant",
+      "status": "completed",
+      "study": "credit-spread-vxn-011",
+      "trial_id": "T0019"
+    },
+    {
+      "counted": false,
+      "data": {
+        "first": "2003-01-02",
+        "last": "2026-11-16"
+      },
+      "domain": "tradfi",
+      "family": "macro.fomc-event",
+      "fingerprint": "d685bb2142b5d1d07a7d0e673eeac3848e04721c59af43913d47b268eb62929e",
+      "hypothesis_id": "H0007",
+      "recorded_at": "2026-11-18T05:18:41.127244+00:00",
+      "source": "myquant",
+      "status": "failed",
+      "study": "fomc-event-study-005",
+      "trial_id": "T0008"
+    },
+    {
+      "counted": true,
+      "data": {
+        "first": "2003-01-02",
+        "last": "2026-11-18"
+      },
+      "domain": "tradfi",
+      "family": "macro.fomc-event",
+      "fingerprint": "c82c6182f15f4177c43fc4265c699864fb5e305484dcb93cb7d28f96645324af",
+      "hypothesis_id": "H0008",
+      "recorded_at": "2026-11-18T05:20:42.050522+00:00",
+      "source": "myquant",
+      "status": "completed",
+      "study": "fomc-event-study-005",
+      "trial_id": "T0009"
+    },
+    {
+      "counted": true,
+      "data": {
+        "first": "2003-01-02",
+        "last": "2026-11-18"
+      },
+      "domain": "tradfi",
+      "family": "macro.fomc-event",
+      "fingerprint": "4942fb6135ac364d57cee042518dd81cfb8680126ffe54a9c9a0b9898d042f56",
+      "hypothesis_id": "H0007",
+      "recorded_at": "2026-11-18T05:20:30.736420+00:00",
+      "source": "myquant",
+      "status": "completed",
+      "study": "fomc-event-study-005",
+      "trial_id": "T0010"
+    },
+    {
+      "counted": true,
+      "data": {
+        "first": "2023-01-02",
+        "last": "2026-11-18"
+      },
+      "domain": "crypto",
+      "family": "crypto.cross-asset-transmission",
+      "fingerprint": "1240f8d7a520897f5525c3ca8be9dcc1145c32fb8c420e8e8e7497af823d5024",
+      "hypothesis_id": "H0002",
+      "recorded_at": "2026-11-18T01:36:26.824159+00:00",
+      "source": "myquant",
+      "status": "completed",
+      "study": "lowvol-002",
+      "trial_id": "T0002"
+    },
+    {
+      "counted": true,
+      "data": {
+        "first": "2021-01-12",
+        "last": "2026-11-18"
+      },
+      "domain": "crypto",
+      "family": "crypto.macro-event-windows",
+      "fingerprint": "af641748117fe8fe3077fab5bd5f56ff082e6fafd6b913b704cc5c5a9f69e186",
+      "hypothesis_id": "H0009",
+      "recorded_at": "2026-11-18T06:06:15.482236+00:00",
+      "source": "myquant",
+      "status": "completed",
+      "study": "macro-windows-006",
+      "trial_id": "T0011"
+    },
+    {
+      "counted": true,
+      "data": {
+        "first": "2021-01-12",
+        "last": "2026-11-18"
+      },
+      "domain": "crypto",
+      "family": "crypto.macro-event-windows",
+      "fingerprint": "4b0dd1cce4fbe6e15849ba3ef80355d60591afdf9f3c0913f7cea8bf2681cb8d",
+      "hypothesis_id": "H0010",
+      "recorded_at": "2026-11-18T06:06:27.124809+00:00",
+      "source": "myquant",
+      "status": "completed",
+      "study": "macro-windows-006",
+      "trial_id": "T0012"
+    },
+    {
+      "counted": true,
+      "data": {
+        "first": "2003-01-02",
+        "last": "2020-05-15"
+      },
+      "domain": "tradfi",
+      "family": "tradfi.vol-repricing",
+      "fingerprint": "77f2789ca1ea9540e0f89baede80cad82c8e80c2ea0b8eae39c8b1ba0494375b",
+      "hypothesis_id": "H0004",
+      "recorded_at": "2026-11-18T02:35:21.158127+00:00",
+      "source": "myquant",
+      "status": "completed",
+      "study": "move-vix-003",
+      "trial_id": "T0004"
+    },
+    {
+      "counted": true,
+      "data": {
+        "first": "2021-01-22",
+        "last": "2026-11-18"
+      },
+      "domain": "crypto",
+      "family": "crypto.options-expiry",
+      "fingerprint": "644b4221b24643bdf95470bde06b26911727b9281c1de8aafcd5845008bff935",
+      "hypothesis_id": "H0005",
+      "recorded_at": "2026-11-18T04:30:06.808882+00:00",
+      "source": "myquant",
+      "status": "completed",
+      "study": "options-expiry-004",
+      "trial_id": "T0005"
+    },
+    {
+      "counted": false,
+      "data": null,
+      "domain": "crypto",
+      "family": "crypto.options-expiry",
+      "fingerprint": "0525941f072a1674a4a9da58b06bf92b41fbcab10ef88d9bf50854421dc3834d",
+      "hypothesis_id": "H0006",
+      "recorded_at": "2026-11-18T04:30:16.194212+00:00",
+      "source": "myquant",
+      "status": "failed",
+      "study": "options-expiry-004",
+      "trial_id": "T0006"
+    },
+    {
+      "counted": true,
+      "data": {
+        "first": "2021-01-22",
+        "last": "2026-11-16"
+      },
+      "domain": "crypto",
+      "family": "crypto.options-expiry",
+      "fingerprint": "69d75c944b750c9b90a9b08f2f5aa7cb635e2f4bc58ad5c44b966add4f9d480d",
+      "hypothesis_id": "H0006",
+      "recorded_at": "2026-11-18T04:31:46.202788+00:00",
+      "source": "myquant",
+      "status": "completed",
+      "study": "options-expiry-004",
+      "trial_id": "T0007"
+    },
+    {
+      "counted": true,
+      "data": {
+        "first": "2003-01-02",
+        "last": "2026-11-18"
+      },
+      "domain": "mixed",
+      "family": "macro.publication-lag",
+      "fingerprint": "a4852f550c5e11d555786712820c6c8b698c19cf566bef1f691fb5f3b119fa23",
+      "hypothesis_id": "H0011",
+      "recorded_at": "2026-11-18T06:42:50.400386+00:00",
+      "source": "myquant",
+      "status": "completed",
+      "study": "publication-lag-007",
+      "trial_id": "T0013"
+    },
+    {
+      "counted": false,
+      "data": {
+        "first": "2020-11-01",
+        "last": "2026-11-18"
+      },
+      "domain": "mixed",
+      "family": "macro.publication-lag",
+      "fingerprint": "19a7c75980631eab20eeeb64d280c9de407f7e7cb8090e5a570dd4294d00c101",
+      "hypothesis_id": "H0012",
+      "recorded_at": "2026-11-18T06:43:00.198445+00:00",
+      "source": "myquant",
+      "status": "failed",
+      "study": "publication-lag-007",
+      "trial_id": "T0014"
+    },
+    {
+      "counted": true,
+      "data": {
+        "first": "2020-11-01",
+        "last": "2026-11-18"
+      },
+      "domain": "mixed",
+      "family": "macro.publication-lag",
+      "fingerprint": "6d757217ecab7b2e573ba8260579fc08bf643e22ce3a4ba7b3cd53f9eb6e9976",
+      "hypothesis_id": "H0012",
+      "recorded_at": "2026-11-18T06:43:32.616299+00:00",
+      "source": "myquant",
+      "status": "completed",
+      "study": "publication-lag-007",
+      "trial_id": "T0015"
+    }
+  ],
+  "summary": {
+    "counted_by_domain": {
+      "crypto": 9,
+      "tradfi": 10
+    },
+    "families": {
+      "crypto.cross-asset-transmission": {
+        "counted": 2,
+        "domain": "crypto",
+        "first": "2023-01-02",
+        "last": "2026-11-18",
+        "trials": [
+          "myquant:T0001",
+          "myquant:T0002"
+        ]
+      },
+      "crypto.implied-vol": {
+        "counted": 1,
+        "domain": "crypto",
+        "first": "2021-03-24",
+        "last": "2026-11-19",
+        "trials": [
+          "myquant:T0021"
+        ]
+      },
+      "crypto.macro-event-windows": {
+        "counted": 2,
+        "domain": "crypto",
+        "first": "2021-01-12",
+        "last": "2026-11-18",
+        "trials": [
+          "myquant:T0011",
+          "myquant:T0012"
+        ]
+      },
+      "crypto.options-expiry": {
+        "counted": 2,
+        "domain": "crypto",
+        "first": "2021-01-22",
+        "last": "2026-11-18",
+        "trials": [
+          "myquant:T0005",
+          "myquant:T0006",
+          "myquant:T0007"
+        ]
+      },
+      "finance-research.H-0001": {
+        "counted": 0,
+        "domain": "synthetic",
+        "first": "2011-12-31",
+        "last": "2011-12-31",
+        "trials": [
+          "finance-research:T-000001"
+        ]
+      },
+      "macro.fomc-event": {
+        "counted": 2,
+        "domain": "tradfi",
+        "first": "2003-01-02",
+        "last": "2026-11-18",
+        "trials": [
+          "myquant:T0008",
+          "myquant:T0009",
+          "myquant:T0010"
+        ]
+      },
+      "macro.publication-lag": {
+        "counted": 2,
+        "domain": "mixed",
+        "first": "2003-01-02",
+        "last": "2026-11-18",
+        "trials": [
+          "myquant:T0013",
+          "myquant:T0014",
+          "myquant:T0015"
+        ]
+      },
+      "tradfi.credit-spread-lead": {
+        "counted": 5,
+        "domain": "tradfi",
+        "first": "2003-01-02",
+        "last": "2026-11-19",
+        "trials": [
+          "myquant:T0020",
+          "myquant:T0016",
+          "myquant:T0017",
+          "myquant:T0018",
+          "myquant:T0019"
+        ]
+      },
+      "tradfi.vol-repricing": {
+        "counted": 1,
+        "domain": "tradfi",
+        "first": "2003-01-02",
+        "last": "2020-05-15",
+        "trials": [
+          "myquant:T0004"
+        ]
+      }
+    }
+  }
+}

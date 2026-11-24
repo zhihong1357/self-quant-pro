@@ -1,0 +1,49 @@
+# 继承来源与分类（人写）。
+# `sqp inherit scan` 按这里的规则生成 registry/inherited/；
+# `sqp inherit verify` 在干净的环境里按固定提交重新生成，并逐字节比对。
+# domain：crypto / tradfi / mixed / synthetic。mixed 同时计入 crypto 和 tradfi。
+# family（假说族）决定试验次数和"看过的数据"归到哪一族。
+
+[[source]]
+name = "finance-research"
+url = "https://github.com/zhihong1357/finance-research"
+generation = 2
+role = "第二代：科研规程、U1 分段边界、数据源清单"
+format = "finance-research"
+pin = ["README.md", "AGENTS.md", "CLAUDE.md", "docs/*", "registry/*", "config/*"]
+vendor = ["registry/*.jsonl", "registry/hypotheses/*.toml"]
+trials = ["registry/trials.jsonl"]
+
+[[source]]
+name = "myquant"
+url = "https://github.com/zhihong1357/myquant"
+generation = 2
+role = "第二代：13 项研究的试验账本与假说事件"
+format = "myquant"
+pin = [
+  "README.md", "AGENTS.md", "research/*/README.md", "research/*/trials.jsonl",
+  "research/*/hypotheses/*", "research/decision-records/*",
+]
+vendor = ["research/*/trials.jsonl", "research/*/hypotheses/hypothesis-events.jsonl"]
+trials = ["research/*/trials.jsonl"]
+
+[studies.myquant]
+"btc-eth-001" = { domain = "crypto", family = "crypto.cross-asset-transmission" }
+"lowvol-002" = { domain = "crypto", family = "crypto.cross-asset-transmission" }
+"move-vix-003" = { domain = "tradfi", family = "tradfi.vol-repricing" }
+"options-expiry-004" = { domain = "crypto", family = "crypto.options-expiry" }
+"fomc-event-study-005" = { domain = "tradfi", family = "macro.fomc-event" }
+"macro-windows-006" = { domain = "crypto", family = "crypto.macro-event-windows" }
+"publication-lag-007" = { domain = "mixed", family = "macro.publication-lag" }
+"credit-spread-spx-008" = { domain = "tradfi", family = "tradfi.credit-spread-lead" }
+"credit-spread-tyvix-009" = { domain = "tradfi", family = "tradfi.credit-spread-lead" }
+"credit-spread-vix-010" = { domain = "tradfi", family = "tradfi.credit-spread-lead" }
+"credit-spread-vxn-011" = { domain = "tradfi", family = "tradfi.credit-spread-lead" }
+"credit-spread-dgs10-012" = { domain = "tradfi", family = "tradfi.credit-spread-lead" }
+"btc-dvol-013" = { domain = "crypto", family = "crypto.implied-vol" }
+
+# finance-research 的试验按假说卡里的 universe 字段归类
+[studies.finance-research.universes]
+synthetic = "synthetic"
+U1 = "crypto"
+U2 = "tradfi"

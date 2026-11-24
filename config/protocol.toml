@@ -1,0 +1,19 @@
+# 科研规程的默认阈值（docs/protocol.md 第 5 节）。
+# 假说注册时只能设得比这里更严，`sqp check` 会检查。
+# 本文件受冻结保护：修改必须在同一个 PR 新增决策记录，正文写明 config/protocol.toml。
+# 这些是暂行值，G3 的元研究在纯噪声上量出实际误报率之后定稿。
+
+[thresholds]
+t_stat = 3.0                 # t 统计量下限
+t_stat_with_mechanism = 2.5  # 有明确机制、注册时写明理由，可以降到这个值
+deflated_sharpe = 0.95       # 折损夏普（概率形式）下限
+pbo = 0.10                   # 回测过拟合概率上限（只适用于从多组参数里选优）
+cost_multiplier = 2.0        # 成本乘以这个倍数后，收益仍须为正
+drop_best_trades = 2         # 去掉最好的这么多笔之后，收益仍须为正
+param_perturbation = 0.20    # 参数上下扰动这个幅度，结论的符号不变
+
+[power]
+target = 0.80                # 注册前功效检验的目标把握
+
+[segments]
+names = ["exploration", "confirmation", "vault", "forward"]

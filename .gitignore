@@ -1,0 +1,34 @@
+# Python / uv
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
+*.egg-info/
+
+# 本机密钥：永远不进仓库（模板见 .env.example）
+.env
+.env.*
+!.env.example
+
+# 数据与产出：不进仓库（见 docs/compliance.md）
+data/
+cache/
+artifacts/
+*.parquet
+*.feather
+*.arrow
+*.duckdb
+*.sqlite
+*.db
+
+# 编辑器与系统文件
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# 笔记本检查点
+.ipynb_checkpoints/
