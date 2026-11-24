@@ -56,6 +56,21 @@ def test_scan_is_deterministic_and_clamps_dates(tmp_path):
     assert trials["records"][0]["data"] == {"first": "2023-01-02", "last": "2026-11-18"}
 
 
+def test_vendored_copies_drop_derived_numbers(tmp_path):
+    src = make_source(tmp_path)
+    keep = ["trial_id", "hypothesis_id", "status", "recorded_at"]
+    config = {
+        **CONFIG,
+        "source": [{**CONFIG["source"][0], "keep_fields": {"research/*/trials.jsonl": keep}}],
+    }
+    out = tmp_path / "a" / "inherited"
+    inherit.scan(config, {"myquant": src}, out)
+    copied = json.loads((out / "myquant/research/s1/trials.jsonl").read_text("utf-8"))
+    assert sorted(copied) == sorted(keep)
+    trials = json.loads((out / "trials.json").read_text("utf-8"))
+    assert trials["records"][0]["data"]["last"] == "2026-11-18"  # still read from the source
+
+
 def test_unclassified_study_is_refused(tmp_path):
     src = make_source(tmp_path, study="unknown")
     with pytest.raises(RuntimeError):

@@ -14,6 +14,13 @@ pin = ["README.md", "AGENTS.md", "CLAUDE.md", "docs/*", "registry/*", "config/*"
 vendor = ["registry/*.jsonl", "registry/hypotheses/*.toml"]
 trials = ["registry/trials.jsonl"]
 
+# 复制进本仓库时只保留这些字段：由第三方数据算出的数值不进公开仓库（决策 0011）
+[source.keep_fields]
+"registry/trials.jsonl" = [
+  "trial_id", "hypothesis", "segment", "recorded_at", "prev", "manifest", "config",
+  "output_fingerprint", "result_fingerprint", "vault_approval",
+]
+
 [[source]]
 name = "myquant"
 url = "https://github.com/zhihong1357/myquant"
@@ -26,6 +33,15 @@ pin = [
 ]
 vendor = ["research/*/trials.jsonl", "research/*/hypotheses/hypothesis-events.jsonl"]
 trials = ["research/*/trials.jsonl"]
+
+[source.keep_fields]
+"research/*/trials.jsonl" = [
+  "trial_id", "hypothesis_id", "status", "recorded_at", "previous_hash", "record_hash",
+]
+"research/*/hypotheses/hypothesis-events.jsonl" = [
+  "hypothesis_id", "version", "from_state", "to_state", "recorded_at", "previous_hash",
+  "event_hash",
+]
 
 [studies.myquant]
 "btc-eth-001" = { domain = "crypto", family = "crypto.cross-asset-transmission" }

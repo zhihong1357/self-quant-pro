@@ -94,6 +94,16 @@ def test_drafts_may_change(sandbox):
     assert sandbox.rules(base) == set()
 
 
+def test_derived_numbers_stay_out_of_public_ledgers(sandbox):
+    from sqp import ledger
+
+    path = sandbox.root / "registry/ledger/trials.jsonl"
+    ledger.append(path, {"kind": "trial", "result_fingerprint": "sha256:" + "0" * 64})
+    assert sandbox.rules() == set()
+    ledger.append(path, {"kind": "trial", "metrics": {"sharpe": 1.2}})
+    assert "derived-results" in sandbox.rules()
+
+
 def test_hypotheses_cannot_be_deleted(sandbox):
     setup(sandbox, DRAFT)
     base = sandbox.commit()

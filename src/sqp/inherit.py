@@ -151,6 +151,26 @@ def _summary(records: list[dict]) -> dict:
     return {"counted_by_domain": dict(sorted(by_domain.items())), "families": families}
 
 
+def _vendored_bytes(path: str, data: bytes, keep_fields: dict[str, list[str]]) -> bytes:
+    """Copy a file, keeping only whitelisted top-level fields of JSONL records if a rule matches.
+
+    Numbers derived from third-party data stay out of the public repository (decision 0011);
+    identifiers, dates, states and fingerprints are kept so records stay checkable against
+    the source repository.
+    """
+    rule = next((keep for glob, keep in keep_fields.items() if _match(path, [glob])), None)
+    if rule is None:
+        return data
+    out = []
+    for line in data.decode("utf-8").splitlines():
+        if not line.strip():
+            continue
+        record = json.loads(line)
+        kept = {k: record[k] for k in rule if k in record}
+        out.append(json.dumps(kept, sort_keys=True, separators=(",", ":"), ensure_ascii=False))
+    return ("\n".join(out) + "\n").encode() if out else b""
+
+
 def _write_json(path: Path, obj: object) -> None:
     path.write_text(json.dumps(obj, ensure_ascii=False, indent=2, sort_keys=True) + "\n", "utf-8")
 
@@ -183,7 +203,7 @@ def scan(config: dict, sources: dict[str, Path], out: Path) -> None:
             if _match(path, source.get("vendor", [])):
                 target = out / name / path
                 target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_bytes(data)
+                target.write_bytes(_vendored_bytes(path, data, source.get("keep_fields", {})))
         trial_files = [p for p in tracked if _match(p, source.get("trials", []))]
         studies = config.get("studies", {}).get(name, {})
         records += PARSERS[source["format"]](src, trial_files, studies)

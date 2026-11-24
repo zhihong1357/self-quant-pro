@@ -77,6 +77,7 @@ G7 之前不开常驻虚拟机。部署流程：PR 合并 → 持续集成通过
 | `universe-exposure` | 前代看过的数据有没有声明 | `checks/registry.py` |
 | `hypothesis-schema` | 假说卡的字段；阈值只能更严 | `checks/registry.py` |
 | `ledger-chain` | 账本的哈希链 | `checks/registry.py` |
+| `derived-results` | `registry/` 下的 JSONL 记录不带数值结果字段 | `checks/registry.py` |
 | `decision-format`、`decision-number` | 决策记录的格式与编号 | `checks/decisions.py` |
 | `no-delete` | 不能删除的文件 | `checks/history.py` |
 | `ledger-append-only` | 账本只能追加 | `checks/history.py` |

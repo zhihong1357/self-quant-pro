@@ -36,6 +36,8 @@ class Governance:
     secret_file_globs: tuple[str, ...]
     secret_file_allow: tuple[str, ...]
     secret_patterns: tuple[Pattern, ...]
+    derived_jsonl_globs: tuple[str, ...]
+    derived_forbidden_keys: tuple[str, ...]
     ledger_globs: tuple[str, ...]
     frozen_globs: tuple[str, ...]
     no_delete_globs: tuple[str, ...]
@@ -55,7 +57,7 @@ def _patterns(items: list[dict]) -> tuple[Pattern, ...]:
 def load_governance(text: str) -> Governance:
     data = tomllib.loads(text)
     stage, code, files = data["stage"], data["code"], data["files"]
-    secrets, history = data["secrets"], data["history"]
+    secrets, derived, history = data["secrets"], data["derived"], data["history"]
     return Governance(
         stage_file=stage["file"],
         stages=tuple(stage["order"]),
@@ -69,6 +71,8 @@ def load_governance(text: str) -> Governance:
         secret_file_globs=tuple(files["secret_file_globs"]),
         secret_file_allow=tuple(files["secret_file_allow"]),
         secret_patterns=_patterns(secrets["patterns"]),
+        derived_jsonl_globs=tuple(derived["jsonl_globs"]),
+        derived_forbidden_keys=tuple(derived["forbidden_keys"]),
         ledger_globs=tuple(history["ledger_globs"]),
         frozen_globs=tuple(history["frozen_globs"]),
         no_delete_globs=tuple(history["no_delete_globs"]),
