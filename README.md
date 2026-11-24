@@ -11,6 +11,7 @@
 | 所有者 | [所有者简报](docs/owner-brief.md) |
 | AI 智能体（任何模型） | [AGENTS.md](AGENTS.md)，再按里面的顺序读 |
 | 想了解设计 | [宪章](docs/charter.md) → [科研规程](docs/protocol.md) → [架构](docs/architecture.md) → [路线图](docs/roadmap.md) |
+| 想知道先研究什么 | [研究可行性地图](docs/research-map.md) |
 
 ## 和前两代的关系
 
