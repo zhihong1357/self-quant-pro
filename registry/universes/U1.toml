@@ -33,8 +33,9 @@ families_burned = [
   "crypto.macro-event-windows",
   "crypto.options-expiry",
   "macro.publication-lag",
-  # 没有试验记录、但看过数据的探索（myquant 的 microstructure-4a/4b、funding-history），按最坏情况算
-  "crypto.microstructure",
-  "crypto.funding",
 ]
 burned_through = 2026-11-19
+
+# 只用掉了金库、确认集仍然干净的族：最终检验改用 burned_through 之后的前向数据。
+# myquant 的 funding-history 看过 2026-08-17 至 2026-11-18 的资金费率（决策 0013）。
+vault_burned = ["crypto.funding"]

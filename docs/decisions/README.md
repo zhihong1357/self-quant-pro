@@ -15,3 +15,5 @@
 | [0009](0009-one-model-capital-range.md) | 一个统一模型，输出最佳资金区间 |
 | [0010](0010-owner-decisions-2026-11-24.md) | 所有者的四项决定：数据放谷歌云存储、仓库继续公开、风险上限由使用者设定、起步资金暂定 1,000 美元 |
 | [0011](0011-derived-results-stay-private.md) | 由第三方数据算出的数值不进公开仓库；Binance Vision 数据不能直接用于实盘 |
+| [0012](0012-no-self-collection-on-critical-path.md) | 研究的关键路径不依赖自己采集的数据；目前不做实盘 |
+| [0013](0013-u1-exposure-by-evidence.md) | U1 的暴露声明按实际看过的数据修正：资金费率族的确认集可用 |
