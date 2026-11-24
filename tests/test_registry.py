@@ -23,6 +23,7 @@ registered_at = 2026-11-25
 segments = ["confirmation"]
 min_effect_sharpe = 1.5
 test_plan = "冻结的检验方案"
+literature_exposure = "查过 arXiv:2510.14435，没有覆盖本假说"
 
 [thresholds]
 t_stat = 3.0
@@ -102,6 +103,14 @@ def test_derived_numbers_stay_out_of_public_ledgers(sandbox):
     assert sandbox.rules() == set()
     ledger.append(path, {"kind": "trial", "metrics": {"sharpe": 1.2}})
     assert "derived-results" in sandbox.rules()
+
+
+def test_registration_must_declare_literature_exposure(sandbox):
+    setup(
+        sandbox,
+        REGISTERED.replace('literature_exposure = "查过 arXiv:2510.14435，没有覆盖本假说"\n', ""),
+    )
+    assert "hypothesis-schema" in sandbox.rules()
 
 
 def test_hypotheses_cannot_be_deleted(sandbox):

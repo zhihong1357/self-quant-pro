@@ -191,6 +191,16 @@ def _hypothesis(path: str, card: dict, universes: set[str], protocol: dict) -> l
         )
     if not isinstance(registration.get("test_plan"), str) or not registration["test_plan"]:
         found.append(Violation("hypothesis-schema", path, "registration.test_plan 不能为空"))
+    literature = registration.get("literature_exposure")
+    if not isinstance(literature, str) or not literature:
+        found.append(
+            Violation(
+                "hypothesis-schema",
+                path,
+                "registration.literature_exposure 不能为空：写明查过哪些文献，"
+                "有没有报告过本假说在确认集时段的表现（决策 0014）",
+            )
+        )
     return found + _thresholds(path, thresholds, registration, protocol["thresholds"])
 
 
