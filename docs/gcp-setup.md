@@ -20,6 +20,7 @@
 2. 左边栏会提示有没有可以领取的赠金，点进去，弹出 **Claim Google Cloud Credits** 窗口。
 3. 按提示建开发者档案，再建结算账号（这一步绑卡）。
 4. 最后点 **Redeem and Continue**。以后每个月的赠金会自动加到这个结算账号。
+5. 如果页面要求**预付 5 美元**：那是用赠金抵扣 Gemini API 费用的条件（谷歌官方博客，2026-11-13），G1 只用存储，用不到。先不付，改走 B；拿不准就截图发给智能体。
 
 **B. 在 Google Developer Program 的权益页领**
 1. 打开 program.google.com/my-benefits。

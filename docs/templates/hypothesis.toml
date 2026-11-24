@@ -25,7 +25,7 @@ prior = 0.2                    # 事先认为它成立的概率
 # segments = ["confirmation"]
 # min_effect_sharpe = 1.5      # 事先认为合理的最小年化夏普；先跑 sqp power 看门槛
 # test_plan = "冻结的检验方案：指标、检验方法、数据段、成本假设"
-# literature_exposure = "查过哪些文献；有没有报告过本假说在确认集时段的表现（决策 0014）"
+# literature_exposure = "查过哪些文献；有没有报告过本假说在确认集时段的表现（决策 0014）；用了语言模型生成的特征时，写明模型、版本和知识截止日（决策 0016）"
 # mechanism_exception = ""     # 只有想把 t 门槛降到 2.5 时才写：为什么机制足够明确
 #
 # [thresholds]                 # 只能比 config/protocol.toml 更严
