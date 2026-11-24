@@ -21,13 +21,13 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: 取出 main 上的检查器（可信）
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           path: trusted
           persist-credentials: false
       - name: 取出 PR 的内容（只读，不执行）
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.sha }}
@@ -39,7 +39,7 @@ jobs:
           BASE_REPO: ${{ github.repository }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: git -C pr fetch --no-tags --quiet "https://github.com/$BASE_REPO" "$BASE_SHA"
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           enable-cache: false
       - name: 安装可信检查器
