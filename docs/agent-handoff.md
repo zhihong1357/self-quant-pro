@@ -2,6 +2,41 @@
 
 每次会话结束时更新这一页：最新的写在最上面，旧的往下推。只写下一个会话需要知道的事。
 
+## 2026-11-24 · Claude（Opus 5.5）· G1 开始
+
+**做了什么**
+- 决策 0015（所有者）：G1 现在开始，不等 finance-research 的决定；`STAGE` 改为 G1。数据层从头写，只参考第二代的设计。
+- 核对了谷歌云的两处事实（2026-11-24）：
+  - AI Pro 的每月 10 美元赠金可以在 AI Studio 里领取。
+  - 封顶预算已正式发布，但不暂停存储。
+  - 成本护栏、宪章、架构，以及 0003、0010 的状态行都已更正。
+- 新增 `docs/gcp-setup.md` 和 `scripts/gcp/setup-storage.sh`。所有者在 Cloud Shell 里跑一行命令，脚本建这几样东西：
+  - 私有存储桶，放在 us-central1。
+  - 直接的 Workload Identity Federation：按仓库和所有者的数字编号认，只放行 `main` 上定时或手动触发的工作流。
+  - 存储桶权限只有 `objectCreator` 和 `objectViewer`。
+  - 预算提醒。
+- 脚本用假的 gcloud 跑过五种情况：全新、已存在、预算失败、ID 写错、取消。shellcheck 没有告警。
+
+**没做完 / 等所有者**
+- 所有者按 `docs/gcp-setup.md` 开通谷歌云，把最后三行（`GCP_PROJECT_ID`、`GCP_WIF_PROVIDER`、`SQP_BUCKET`）发回来。
+- 收到后，用 `gh variable set` 写进仓库的 Actions 变量。这三项不是密钥，但不写进代码，日志里也不打印存储桶名。
+
+**下一步：G1 的代码，按顺序，每步一个 PR**
+1. 数据源登记：Binance Vision 的 U 本位永续资金费率、1 小时 K 线、1 小时标记价格，以及现货 1 小时 K 线。每个数据源写明条款核对的结论。
+2. 下载器：
+   - 按 `.CHECKSUM` 校验。
+   - 原始层只增不改，有两种存储后端：本机和谷歌云存储。
+   - 上传带 `if_generation_match=0`，上传前先检查存储桶的总量。
+3. 时点接口：可知时间、时钟上限、金库守卫、`refusals.jsonl`。
+4. 探索集画像：一条命令能重算；结果只写进私有存储桶，日志只打印计数和指纹。
+
+新依赖都要在 PR 里写理由，候选是 `google-cloud-storage`，以及 `pyarrow` 或 `polars`。
+
+**踩到的坑**
+- 这个会话的 `gh api` 只能访问本仓库。读别的公开仓库用 `git clone --depth 1`，只读，不运行。
+- 开了 `set -o pipefail` 时，`命令 | grep -q` 可能因为 grep 提前退出而误判。先把输出存进变量，再用 grep。
+- 还没核实 GitHub 的美国运行器能不能访问 data.binance.vision（估计能，置信度中）。第一次运行数据工作流时会验证；不行就改用 Colab 或所有者的 Mac mini。
+
 ## 2026-11-24 · Claude（Opus 5.5）· 研究可行性地图第二版
 
 **做了什么**

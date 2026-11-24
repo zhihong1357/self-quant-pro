@@ -20,7 +20,7 @@ G0 只有治理层。其余各层按[路线图](roadmap.md)逐个阶段加入，
 
 ## 2. 目录
 
-现在（G0）：
+现在（G0 交付；G1 进行中，数据层的目录随代码加入）：
 
 | 路径 | 内容 |
 |---|---|
@@ -30,6 +30,7 @@ G0 只有治理层。其余各层按[路线图](roadmap.md)逐个阶段加入，
 | `docs/` | 宪章、规程、架构、路线图、决策记录等 |
 | `registry/` | 继承记录、研究宇宙、假说卡、三本账 |
 | `src/sqp/` | 治理检查与研究工具 |
+| `scripts/gcp/` | 所有者在 Cloud Shell 里运行的一次性设置脚本（[开通谷歌云](gcp-setup.md)） |
 | `tests/` | 测试，含 G0 验收测试 `test_acceptance.py` |
 | `.github/` | 持续集成、PR 模板 |
 
@@ -50,11 +51,11 @@ G0 只有治理层。其余各层按[路线图](roadmap.md)逐个阶段加入，
 | 需要 | 服务 | 要点 |
 |---|---|---|
 | 定时运行 | Cloud Scheduler 触发 Cloud Run 作业 | 跑完即停，不常驻 |
-| 存储 | Cloud Storage | G1 起；存储桶在 us-central1（免费额度区域）；采集账号只能创建对象，存储层面只增不改 |
+| 存储 | Cloud Storage | G1 起；存储桶在 us-central1（免费额度区域）；数据工作流的身份只能新建和读取对象，不能删除和覆盖，存储层面只增不改（决策 0015） |
 | 分析 | BigQuery | 按扫描量计费，每个查询设扫描上限 |
 | 密钥 | Secret Manager | 代码只引用名字，不碰明文 |
 | 镜像 | Artifact Registry | 设清理策略，只留最近几个版本 |
-| 身份 | Workload Identity Federation | GitHub 到谷歌云不发长期 JSON 密钥 |
+| 身份 | Workload Identity Federation | GitHub 到谷歌云不发长期密钥，也不建服务账号；只放行本仓库 `main` 上定时或手动触发的工作流（决策 0015） |
 | 区域 | 存储 us-central1；生产计算 G5 再定 | 要考虑 Binance 主接口拒绝美国 IP，以及跨区流量费（决策 0010） |
 
 G7 之前不开常驻虚拟机。部署流程：PR 合并 → 持续集成通过 → GitHub 的 `production` 环境等所有者点批准 → 部署。费用规则见[成本护栏](cost-guardrails.md)。
