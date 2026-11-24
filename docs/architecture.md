@@ -43,19 +43,19 @@ G0 只有治理层。其余各层按[路线图](roadmap.md)逐个阶段加入，
 | GitHub Actions | 持续集成；G1–G4 的定时数据采集和研究运行 | 公开仓库的标准运行器免费 |
 | Google Colab | 交互式探索、较重的一次性计算 | AI Pro 附带的额度，以 Colab 页面显示为准 |
 | Google AI Studio | 调试提示词；Gemini API 只做研究辅助 | 免费档 |
-| 谷歌云 | 只跑已验收的生产任务（G5 起） | 每月上限 10 美元 |
+| 谷歌云 | G1 起：原始数据存储；G5 起：已验收的生产任务 | 每月上限 10 美元 |
 
-## 4. 谷歌云的生产布局（G5 起）
+## 4. 谷歌云的布局（存储 G1 起，计算 G5 起）
 
 | 需要 | 服务 | 要点 |
 |---|---|---|
 | 定时运行 | Cloud Scheduler 触发 Cloud Run 作业 | 跑完即停，不常驻 |
-| 存储 | Cloud Storage | 与计算同区域；设生命周期规则 |
+| 存储 | Cloud Storage | G1 起；存储桶在 us-central1（免费额度区域）；采集账号只能创建对象，存储层面只增不改 |
 | 分析 | BigQuery | 按扫描量计费，每个查询设扫描上限 |
 | 密钥 | Secret Manager | 代码只引用名字，不碰明文 |
 | 镜像 | Artifact Registry | 设清理策略，只留最近几个版本 |
 | 身份 | Workload Identity Federation | GitHub 到谷歌云不发长期 JSON 密钥 |
-| 区域 | asia-southeast1（新加坡） | 数据和计算同区域，避免跨区流量费 |
+| 区域 | 存储 us-central1；生产计算 G5 再定 | 要考虑 Binance 主接口拒绝美国 IP，以及跨区流量费（决策 0010） |
 
 G7 之前不开常驻虚拟机。部署流程：PR 合并 → 持续集成通过 → GitHub 的 `production` 环境等所有者点批准 → 部署。费用规则见[成本护栏](cost-guardrails.md)。
 

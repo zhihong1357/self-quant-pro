@@ -13,3 +13,4 @@
 | [0007](0007-agents-and-review.md) | 智能体分工与审查 |
 | [0008](0008-cross-generation-accounting.md) | 跨代记账与数据暴露 |
 | [0009](0009-one-model-capital-range.md) | 一个统一模型，输出最佳资金区间 |
+| [0010](0010-owner-decisions-2026-11-24.md) | 所有者的四项决定：数据放谷歌云存储、仓库继续公开、风险上限由使用者设定、起步资金暂定 1,000 美元 |

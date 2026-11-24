@@ -35,7 +35,9 @@
 3. **Target branches** → **Add target** → **Include default branch**。
 4. 勾选：**Restrict deletions**、**Block force pushes**。
 5. 勾选 **Require a pull request before merging**（"Required approvals" 保持 0：你不能批准自己的 PR，合并本身就是你的批准）。
-6. 勾选 **Require status checks to pass**，再勾选 **Require branches to be up to date before merging**；点 **Add checks**，搜索并加入 `tests` 和 `rules`。
+6. 勾选 **Require status checks to pass**，再勾选 **Require branches to be up to date before merging**；点 **Add checks**，搜索并加入 `tests`。
+   `rules` 第一次搜不到是正常的：GitHub 只列出在仓库里跑过的检查，而 `rules` 要等 G0 合并之后的第一个 PR 才第一次运行。那个 PR 打开、检查跑完之后，回到这里点 **Add checks** 加入 `rules`，再点 **Save changes**。
+   **两个检查的来源都要选 GitHub Actions**，不要选 claude、cursor、kiro 等其他应用。来源选错了，检查永远等不到结果，所有 PR 都会合并不了。
 7. 点 **Create**。
 
 **C. 打开推送保护**
@@ -53,15 +55,15 @@
 
 ## 5. 接下来要你决定的事
 
-| 什么时候 | 决定什么 |
-|---|---|
-| 现在 | 读决策 0001–0009，合并 G0 的 PR，做第 3 节的设置 |
-| 约 2026-12-08 | finance-research 怎么办：G1 接管它的数据代码，还是从头写 |
-| G1 开头 | 原始数据放哪里：Hugging Face 私有数据集，还是谷歌云存储 |
-| G4 结束 | 仓库继续公开还是转私有 |
-| G5 开始 | 开通谷歌云（会有逐步说明） |
-| G6 开始前 | 你能承受的最大亏损：写成一个具体数字 |
-| G7 | 是否实盘、用多少钱起步 |
+| 什么时候 | 决定什么 | 状态 |
+|---|---|---|
+| 现在 | 合并 G0 的 PR，做第 3 节的设置 | 已合并；设置进行中 |
+| 约 2026-12-08 | finance-research 怎么办：G1 接管它的数据代码，还是从头写 | 待定 |
+| G1 开头 | 原始数据放哪里 | 已定：谷歌云存储（决策 0010） |
+| G1 开头 | 开通谷歌云，只用于存储（会有逐步说明） | 待做 |
+| G4 结束 | 仓库公开还是私有 | 已定：继续公开（决策 0010） |
+| G6 开始前 | 风险上限 | 已定：做成使用者设定的参数，系统不写死（决策 0010） |
+| G7 | 是否实盘、起步资金 | 已定：是；暂定 1,000 美元，到 G7 再确认（决策 0010） |
 
 ## 6. 怎么跟智能体说话
 
