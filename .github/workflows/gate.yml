@@ -1,0 +1,52 @@
+name: gate
+
+# 用 main 上已经合并的检查器，检查 PR 的内容。
+# PR 改不了这里运行的代码，所以规则不能在同一个 PR 里被悄悄削弱。
+# 这个工作流不执行 PR 里的任何代码，也拿不到任何密钥。
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  rules:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 取出 main 上的检查器（可信）
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: trusted
+          persist-credentials: false
+      - name: 取出 PR 的内容（只读，不执行）
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pr
+          fetch-depth: 0
+          persist-credentials: false
+      - name: 取回比对基准
+        env:
+          BASE_REPO: ${{ github.repository }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: git -C pr fetch --no-tags --quiet "https://github.com/$BASE_REPO" "$BASE_SHA"
+      - uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: false
+      - name: 安装可信检查器
+        working-directory: trusted
+        run: uv sync --locked
+      - name: 检查 PR
+        working-directory: trusted
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: uv run --locked sqp check --repo ../pr --base "$BASE_SHA"

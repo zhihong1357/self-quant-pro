@@ -1,0 +1,1211 @@
+{
+  "generated_by": "sqp inherit scan",
+  "sources": [
+    {
+      "commit": "a7683918e28b4de420d51705251a29bb0647b4f3",
+      "files": [
+        {
+          "bytes": 1716,
+          "lines": 25,
+          "path": "AGENTS.md",
+          "sha256": "d4e653ebd83c8f9f5d835a9fcfb28f4c9ebbf5034d54bde132b587d474dd0147"
+        },
+        {
+          "bytes": 5574,
+          "lines": 52,
+          "path": "CLAUDE.md",
+          "sha256": "6879d4209c0c9b54915c7d38c783d14cb700f53fbc6e813974acd18f2dde7c7f"
+        },
+        {
+          "bytes": 2318,
+          "lines": 40,
+          "path": "README.md",
+          "sha256": "80ccb6c2d3e4f5a1a195d764c36209fb6e92a6c7516c503aa2c15c24754962a7"
+        },
+        {
+          "bytes": 494,
+          "lines": 5,
+          "path": "config/acceptance.toml",
+          "sha256": "d822d756a2757f5ac8857bd6713a324480a1f8ac4c8471c84202d079c6c37f5e"
+        },
+        {
+          "bytes": 3773,
+          "lines": 83,
+          "path": "config/archives.toml",
+          "sha256": "64883b6460ef662be45d825979baa90df633f7844dcb3e107a90623936a6d1f6"
+        },
+        {
+          "bytes": 1356,
+          "lines": 26,
+          "path": "config/backup.toml",
+          "sha256": "78a67b27970adee11e3c867f4d52dc76fe805651729edc4dfbf0a1eae59cd711"
+        },
+        {
+          "bytes": 1170,
+          "lines": 26,
+          "path": "config/calendars.toml",
+          "sha256": "550ca426f441705a32f354d1bc679967a3d5a4e283082d94abc4dafb950e867a"
+        },
+        {
+          "bytes": 2866,
+          "lines": 56,
+          "path": "config/cftc.toml",
+          "sha256": "2d2b1fd40dd4319938df0fccd17e4c1c6cb1488c1e614d1eff14faf855c6a441"
+        },
+        {
+          "bytes": 6209,
+          "lines": 132,
+          "path": "config/collect.toml",
+          "sha256": "df859c917844577248b6303956acdfacaac34fa2baf90bbba8ede1155f24ab92"
+        },
+        {
+          "bytes": 1205,
+          "lines": 24,
+          "path": "config/costs.toml",
+          "sha256": "efd3d118105f22a08e7807bb374c5b915024da5e72ba7b7fba304a5f56f1bca6"
+        },
+        {
+          "bytes": 2817,
+          "lines": 50,
+          "path": "config/meta.toml",
+          "sha256": "653fa6a948643b468a2d2f0c65022f223176a48af8f6f51c8d892b5c9efbf97a"
+        },
+        {
+          "bytes": 2946,
+          "lines": 50,
+          "path": "config/noise.toml",
+          "sha256": "0b4085068f99e7f67b9d6759ce41679b9b566c290eca03fb5a0f779eab6ad3fe"
+        },
+        {
+          "bytes": 644,
+          "lines": 7,
+          "path": "config/profile.toml",
+          "sha256": "c44bc900212bf20a02f87ddaf0b8d20c5d89eca4311f59872e6954061c4624db"
+        },
+        {
+          "bytes": 496,
+          "lines": 8,
+          "path": "config/protocol.toml",
+          "sha256": "71026f29b42f4b038eff902aca252a027d4571beb73727aecf89313b6c96fc01"
+        },
+        {
+          "bytes": 2096,
+          "lines": 37,
+          "path": "config/quality.toml",
+          "sha256": "c06844df44a399b44782345193a4963402e254615ae032579d7293c78cdcee7e"
+        },
+        {
+          "bytes": 1102,
+          "lines": 28,
+          "path": "config/recorded.toml",
+          "sha256": "00b6d96fd484f8768d548f559434b876edb6ea22fab081b3f5713c4e1361bd46"
+        },
+        {
+          "bytes": 985,
+          "lines": 20,
+          "path": "config/revised.toml",
+          "sha256": "74eb7e2f82e1fde1deb0c1f114af01aa0b5abffdb02609ff3be58d7111d9a9c7"
+        },
+        {
+          "bytes": 939,
+          "lines": 22,
+          "path": "config/schedules.toml",
+          "sha256": "77701dcad2fb69c8e50667de40e6c4c1d656f53e0510a74aa40638ee83ed0bfd"
+        },
+        {
+          "bytes": 5170,
+          "lines": 69,
+          "path": "config/simulator.toml",
+          "sha256": "56f2e0eacdc6e8d37c0cab08fc0a7666964e87906c120e12baeae1b0e5c4cc88"
+        },
+        {
+          "bytes": 1560,
+          "lines": 27,
+          "path": "config/storage.toml",
+          "sha256": "5abce5bf53345ec7f4e77d266ca4ed7f7384fcb49605d3e9f2ffa8a78be00f49"
+        },
+        {
+          "bytes": 941,
+          "lines": 14,
+          "path": "config/studies/thin_slice.toml",
+          "sha256": "6e4eaf0c21535e2ef3bb2a5caf2ee5bb739e9b387e837da1f17bf1deee60d4a9"
+        },
+        {
+          "bytes": 2986,
+          "lines": 63,
+          "path": "config/u1.toml",
+          "sha256": "3b6a1e7852e40111afb9909672476d6201806fdb60fac461045ece07f1805a7b"
+        },
+        {
+          "bytes": 46479,
+          "lines": 111,
+          "path": "docs/agent-handoff.md",
+          "sha256": "b01842860ce3292a5a3adb181b9281fdbd5fe8d1d966664fc3e8b46cf4e58854"
+        },
+        {
+          "bytes": 94217,
+          "lines": 620,
+          "path": "docs/architecture.md",
+          "sha256": "31eff83cc3c87275a17601085317acd53a19468e9b3ceb6eddeb640b6d65ae71"
+        },
+        {
+          "bytes": 7910,
+          "lines": 113,
+          "path": "docs/charter.md",
+          "sha256": "3ded224d00d549c516456b52b731b4b377050dff2f51207ad3a24759a6c343fd"
+        },
+        {
+          "bytes": 1269,
+          "lines": 26,
+          "path": "docs/decisions/0001-verification-first.md",
+          "sha256": "0fc156639c925cb6a95168331749ff740a726f66610003615d3dd40d867287ce"
+        },
+        {
+          "bytes": 2791,
+          "lines": 53,
+          "path": "docs/decisions/0002-repo-visibility.md",
+          "sha256": "ba304b82bea8c378311241132622c9894b5ab05287d2b90afac879b7338962e3"
+        },
+        {
+          "bytes": 2979,
+          "lines": 54,
+          "path": "docs/decisions/0003-data-storage.md",
+          "sha256": "4feb83bbacc3e45891cb5b038809cee36a37672e1a6db43e168ecdf2d9fdb256"
+        },
+        {
+          "bytes": 2345,
+          "lines": 48,
+          "path": "docs/decisions/0004-toolchain.md",
+          "sha256": "e59b385e7bbfefd0f3903031103b6db20c871375b8f375b2bc62fa88e1b2e75c"
+        },
+        {
+          "bytes": 465,
+          "lines": 17,
+          "path": "docs/decisions/0005-language.md",
+          "sha256": "de5f6589b34514e259357c9d1a79ad7638442983c6c64253e1affb7e905146e5"
+        },
+        {
+          "bytes": 3549,
+          "lines": 47,
+          "path": "docs/decisions/0006-single-model.md",
+          "sha256": "b1ac82d82120b731b180643726d0be1897d45c397af1674dd5b48da037e75851"
+        },
+        {
+          "bytes": 4102,
+          "lines": 53,
+          "path": "docs/decisions/0007-breadth-first-universe.md",
+          "sha256": "29aaf0aec7968a71f6d40536bdaee57c7e08e85f702f6b18760c11b079a3848a"
+        },
+        {
+          "bytes": 2440,
+          "lines": 41,
+          "path": "docs/decisions/0008-derived-results.md",
+          "sha256": "c7b3dfb7e7aa655ccd4010f3937202fcec56ce4db19a3039d687082f271de474"
+        },
+        {
+          "bytes": 1633,
+          "lines": 29,
+          "path": "docs/decisions/0009-cboe-option-chains.md",
+          "sha256": "d1ba3e163367592c63294b1dea99ebebc6546cea56ff2fa8950cb673bf36b4c6"
+        },
+        {
+          "bytes": 4507,
+          "lines": 62,
+          "path": "docs/decisions/0010-u1-minute-data.md",
+          "sha256": "8f5cae9e89e99cd726eb86df065ee97388dae7aba753e4e42164463bb6be3bb1"
+        },
+        {
+          "bytes": 4768,
+          "lines": 56,
+          "path": "docs/decisions/0011-open-interest-time-labels.md",
+          "sha256": "f766d22d353d92c32fad8407c0ee2fb072893bd41f3dd128abed743e57eb857a"
+        },
+        {
+          "bytes": 5656,
+          "lines": 70,
+          "path": "docs/decisions/0012-protocol-revision-after-review.md",
+          "sha256": "8eb8a60d69bd086b6db7f588f5df6c2a5de1bf094acf516e7fef5a877b51bf2e"
+        },
+        {
+          "bytes": 4102,
+          "lines": 41,
+          "path": "docs/decisions/0013-revised-series-storage.md",
+          "sha256": "054bd8b8d926fadfb681d6b2a80a961ae904204f257d684b8b1e9089c59f69ba"
+        },
+        {
+          "bytes": 2928,
+          "lines": 36,
+          "path": "docs/decisions/0014-offsite-backup.md",
+          "sha256": "6d350cef9010393f1daf2c6e3feda2df7f960e8fb923bffcbec06b3105a8369c"
+        },
+        {
+          "bytes": 2349,
+          "lines": 38,
+          "path": "docs/decisions/0015-u1-segments.md",
+          "sha256": "bc603427c842fd8bb18c04740e66aa0a68bd4f0cf674c26e1cefdde04a3b662c"
+        },
+        {
+          "bytes": 1945,
+          "lines": 25,
+          "path": "docs/decisions/0016-u1-breadth.md",
+          "sha256": "e5bacbea5eb72b00d2cf506c4e6f1825d7a415d7809760921baa2c6b29eb9142"
+        },
+        {
+          "bytes": 5263,
+          "lines": 52,
+          "path": "docs/decisions/0017-phase-3-during-phase-2-acceptance.md",
+          "sha256": "9f3f9ab1f3776a37a5d8cf66fe584e25424f971c62055361340df9359aa8aff9"
+        },
+        {
+          "bytes": 3298,
+          "lines": 40,
+          "path": "docs/decisions/0018-meta-research-nominal-level.md",
+          "sha256": "6d29bff4d59c9da7533dda11c16f9b0cb53bf193a9ad6b9b26729983730a3a9b"
+        },
+        {
+          "bytes": 2988,
+          "lines": 36,
+          "path": "docs/decisions/0019-dvol-positive-control.md",
+          "sha256": "cdc4287543e593b43ee7b89d4f7aafff1448d2e3fadd1717b225808dfdb8feed"
+        },
+        {
+          "bytes": 3912,
+          "lines": 45,
+          "path": "docs/decisions/0020-later-phases-during-waits.md",
+          "sha256": "af30cdb1e5b7184904d9b4ed9a81f0b9acfb5b46ddd801570d0fd9ce7f5a1ceb"
+        },
+        {
+          "bytes": 5075,
+          "lines": 49,
+          "path": "docs/decisions/0021-forward-tests.md",
+          "sha256": "71e02f5a085e5d81cdaf4314fb45b0416f69c7a102b8cd14f3c8ec14eb473c61"
+        },
+        {
+          "bytes": 5807,
+          "lines": 66,
+          "path": "docs/decisions/0022-fixes-to-wait-modules.md",
+          "sha256": "e659472281e45b90fdf38c6a8cfe953cb58eb9f3bf621eb4028b206961bca495"
+        },
+        {
+          "bytes": 3762,
+          "lines": 46,
+          "path": "docs/decisions/0023-meta-research-run-counts.md",
+          "sha256": "300e2c635a3142400d7ae1c71b71b0efaeba3107f5f70178ef862db32ba74e35"
+        },
+        {
+          "bytes": 6811,
+          "lines": 69,
+          "path": "docs/decisions/0024-meta-research-bench.md",
+          "sha256": "383278da8845fa0427fb58187d93dfe539ff6ef197f103aa8d8b8c08c88984e2"
+        },
+        {
+          "bytes": 5147,
+          "lines": 49,
+          "path": "docs/decisions/0025-expected-maximum-of-trials.md",
+          "sha256": "d431a5f4557d302d76c8218c2b85e523e53b288f19731c25ad2afaa456309d4a"
+        },
+        {
+          "bytes": 4104,
+          "lines": 49,
+          "path": "docs/decisions/0026-owner-interface.md",
+          "sha256": "6dffe994244632d6d829255d96b7392c24526e943947b7d669e8c1f356ea208a"
+        },
+        {
+          "bytes": 4167,
+          "lines": 47,
+          "path": "docs/decisions/0027-momentum-control-on-forward-data.md",
+          "sha256": "908396ba869f11b1b50d38f7371061f52a14359ee5b02d17eba94a6c1fd75e27"
+        },
+        {
+          "bytes": 3547,
+          "lines": 35,
+          "path": "docs/decisions/README.md",
+          "sha256": "d778e94bca2e68c51519229e2f53e8a1092fb58f08ecd35b37688ee92594364e"
+        },
+        {
+          "bytes": 14686,
+          "lines": 162,
+          "path": "docs/development.md",
+          "sha256": "0edd9bda1af71fc000a7977f483468ffdb83c4566fde478c8da9d32c6660ff4f"
+        },
+        {
+          "bytes": 24052,
+          "lines": 279,
+          "path": "docs/disciplines.md",
+          "sha256": "8b107678eb21f97d64fb4aed370f787d1bd56a573d2d7d2c66a76c82e8ca24ce"
+        },
+        {
+          "bytes": 15962,
+          "lines": 151,
+          "path": "docs/glossary.md",
+          "sha256": "2798ea9926489621f7fd5daf779ec40af4056bfbd80f4913e90c195a648907e8"
+        },
+        {
+          "bytes": 28989,
+          "lines": 263,
+          "path": "docs/meta-research-dry-run.md",
+          "sha256": "aac66c1f8d647cfc292288c1a43ea9d94b537fd8f47c0b479cf77725de6eca16"
+        },
+        {
+          "bytes": 2437,
+          "lines": 53,
+          "path": "docs/owner-brief.md",
+          "sha256": "ddb88fa33cdc1a4b87c59721a5b774149d4077107b12f8cae3825ad8e7e88eec"
+        },
+        {
+          "bytes": 7020,
+          "lines": 113,
+          "path": "docs/owner-guide.md",
+          "sha256": "beabc286a0e9db8427ce2acfb606ca824bfb65efb58fff1272fd712b3e5544b9"
+        },
+        {
+          "bytes": 1437,
+          "lines": 27,
+          "path": "docs/phase-2-acceptance-report.md",
+          "sha256": "d378cfc9dda5edd2a9cdf008d77c3bbc71043e217d49f47b446dde33f1fcf948"
+        },
+        {
+          "bytes": 28470,
+          "lines": 215,
+          "path": "docs/prior-art.md",
+          "sha256": "0204668464a559e9bf4ef4108f03731e7c814118ca70ef487868f027cd278c86"
+        },
+        {
+          "bytes": 2950,
+          "lines": 48,
+          "path": "docs/prior-systems.md",
+          "sha256": "9790910feb5aa32110f854408cfc56f2918442cc26f4657f959752be88aa6682"
+        },
+        {
+          "bytes": 1084,
+          "lines": 11,
+          "path": "docs/privacy-policy.md",
+          "sha256": "a290c49cb2f4293c58345564afc06da8d2ee042d6745b008149588f31a5c08e3"
+        },
+        {
+          "bytes": 14212,
+          "lines": 212,
+          "path": "docs/protocol.md",
+          "sha256": "0d151802036470e21a3f05453edf46f1e9d12491e0bad9dfee00c46fb1bdff2f"
+        },
+        {
+          "bytes": 12384,
+          "lines": 113,
+          "path": "docs/renaissance.md",
+          "sha256": "be94bd8b7579102773894f755ca5397db40ce6bc544c4da89fa7b0308ad79e58"
+        },
+        {
+          "bytes": 64051,
+          "lines": 389,
+          "path": "docs/roadmap.md",
+          "sha256": "233d6942c27291adbd729cc571e910d29d6764da751f9b18b88b5799d11e57df"
+        },
+        {
+          "bytes": 1819,
+          "lines": 24,
+          "path": "registry/README.md",
+          "sha256": "5f173c2d777a90c06fecdf0eea49cef4d2ca201cb9269d31ca08b0485b912a6a"
+        },
+        {
+          "bytes": 278,
+          "lines": 1,
+          "path": "registry/boundaries.jsonl",
+          "sha256": "d1b0c16397631d8735a696473556f3c2c3ddd6241a6fc3adb64e0db39eae0148"
+        },
+        {
+          "bytes": 0,
+          "lines": 0,
+          "path": "registry/hypotheses/.gitkeep",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "bytes": 1816,
+          "lines": 45,
+          "path": "registry/hypotheses/H-0001.toml",
+          "sha256": "1a8d281dfa145599c6c6a1330eee15650f92bd1921a7f74378c066a14b67e598"
+        },
+        {
+          "bytes": 3104,
+          "lines": 44,
+          "path": "registry/hypotheses/H-0002.toml",
+          "sha256": "7314a1e790c0b08af0b2282a28b539bc91c977d1c44991e2bd7698423f514de2"
+        },
+        {
+          "bytes": 2660,
+          "lines": 44,
+          "path": "registry/hypotheses/H-0003.toml",
+          "sha256": "26d69f6cf8ec981315e9b0e770eef1484bf3b459ce9d1c27d482cfaa69884f32"
+        },
+        {
+          "bytes": 2887,
+          "lines": 44,
+          "path": "registry/hypotheses/H-0004.toml",
+          "sha256": "936b046f0edc985d585d1ee4ff75b718edddb7d379664f12ef2af2d25352daf5"
+        },
+        {
+          "bytes": 3199,
+          "lines": 44,
+          "path": "registry/hypotheses/H-0005.toml",
+          "sha256": "58624421ac7a95ee322e3ee00cdc29e0cb09336b0095aa8302097f811e00b576"
+        },
+        {
+          "bytes": 6567,
+          "lines": 56,
+          "path": "registry/hypotheses/H-0006.toml",
+          "sha256": "9e881cd865a3f2538c6690d7ffa7e0dfafcc4e2d5fd7975c77b6b36ea6f7a9a0"
+        },
+        {
+          "bytes": 7444,
+          "lines": 60,
+          "path": "registry/hypotheses/H-0007.toml",
+          "sha256": "e6b1ac1eec7fd837a8626e5afb8229cab6fdf50c52198b80c669ef698e7c7c85"
+        },
+        {
+          "bytes": 7133,
+          "lines": 62,
+          "path": "registry/hypotheses/H-0008.toml",
+          "sha256": "af4c6ca88e097aab3a87c97f793fe775d69aa5f3a8b7b3b5e966e98312d04011"
+        },
+        {
+          "bytes": 0,
+          "lines": 0,
+          "path": "registry/owner_decisions.jsonl",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "bytes": 0,
+          "lines": 0,
+          "path": "registry/refusals.jsonl",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "bytes": 0,
+          "lines": 0,
+          "path": "registry/relations/.gitkeep",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "bytes": 0,
+          "lines": 0,
+          "path": "registry/sources/.gitkeep",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "bytes": 839,
+          "lines": 14,
+          "path": "registry/sources/bea.releases.toml",
+          "sha256": "1390cf6b4f17193e91ad88364f5e5b91b349e8812aeff724a295cdf99dd66f0f"
+        },
+        {
+          "bytes": 1509,
+          "lines": 18,
+          "path": "registry/sources/binance.um.aggtrades.daily.toml",
+          "sha256": "459365b1ebeed15a62bbad77ee0945eda885a43c748f6704aead81688efd1a1b"
+        },
+        {
+          "bytes": 1335,
+          "lines": 19,
+          "path": "registry/sources/binance.um.funding.monthly.toml",
+          "sha256": "12abc7c0d152f89459da79036a5cdd623c7801afc7c52937aabd115d9a92a906"
+        },
+        {
+          "bytes": 1316,
+          "lines": 18,
+          "path": "registry/sources/binance.um.klines_1m.daily.toml",
+          "sha256": "4d97d8097105daf6150a9e670ff93989f7577065f386aa6f369d96a50dc8cd4f"
+        },
+        {
+          "bytes": 1317,
+          "lines": 18,
+          "path": "registry/sources/binance.um.klines_1m.monthly.toml",
+          "sha256": "443c1a484b03e8fca63e3247c2cc051e60fecbdb53d626d5eb239dd02fe6f73f"
+        },
+        {
+          "bytes": 929,
+          "lines": 16,
+          "path": "registry/sources/binance.um.mark_1m.daily.toml",
+          "sha256": "f431f1563019bbb95c6f506f17712c031206b53e8dd93a7cc16457f6f7ab274f"
+        },
+        {
+          "bytes": 1129,
+          "lines": 17,
+          "path": "registry/sources/binance.um.mark_1m.monthly.toml",
+          "sha256": "c5b95968aedc2fe5894533660eed5e0fb03a50bff6f05db752eaae244eaefe77"
+        },
+        {
+          "bytes": 2214,
+          "lines": 22,
+          "path": "registry/sources/binance.um.metrics.daily.toml",
+          "sha256": "d1a1ccc388c2b3345e0a10724c09dd7d6dd1cff3727bbfe40561c0915f32940a"
+        },
+        {
+          "bytes": 973,
+          "lines": 16,
+          "path": "registry/sources/binance.um.trades.daily.toml",
+          "sha256": "4bb68078cd73d397d6115d1ea6bea47767b0e37a7cc7045843f7a809d1a4f442"
+        },
+        {
+          "bytes": 1012,
+          "lines": 16,
+          "path": "registry/sources/bls.releases.toml",
+          "sha256": "89f000be837bf554476d37d99d05a16280351e735f40eb8b31bcc4e91d4d5eb5"
+        },
+        {
+          "bytes": 1443,
+          "lines": 19,
+          "path": "registry/sources/bybit.trades.daily.toml",
+          "sha256": "5b5c3b187e702ea9b4390eccc3f7d8309e6436bd044526d467c595f3f61845a8"
+        },
+        {
+          "bytes": 1561,
+          "lines": 19,
+          "path": "registry/sources/cftc.cot_tff.toml",
+          "sha256": "938b83c9cdbd666a45de76d16974a429fd60aaaa4cdda8d1dce67171135ed353"
+        },
+        {
+          "bytes": 944,
+          "lines": 15,
+          "path": "registry/sources/deribit.book_summary.toml",
+          "sha256": "b61932e5c795ed684efe5a058ef99fb89e3e05134638b04101b267ffffd86302"
+        },
+        {
+          "bytes": 1263,
+          "lines": 17,
+          "path": "registry/sources/deribit.dvol.toml",
+          "sha256": "23c7f410cd37837e42a95d2a60355c2b80e4251ab25ce96ac54f9a606b449036"
+        },
+        {
+          "bytes": 336,
+          "lines": 8,
+          "path": "registry/sources/heartbeat.canary.toml",
+          "sha256": "857cdc535b8a8a05ad767d91831a6f91d1a2214a94e66b6b20ecacffe854203a"
+        },
+        {
+          "bytes": 358,
+          "lines": 8,
+          "path": "registry/sources/heartbeat.drill.toml",
+          "sha256": "f433b593d2625779d439e936c7e7dda79ccd600396dd0cf796195b49cd5bfcc7"
+        },
+        {
+          "bytes": 565,
+          "lines": 14,
+          "path": "registry/sources/hyperliquid.asset_ctxs.toml",
+          "sha256": "94989d8dc6d6ced531c24abe101bce867c790cc7750134582a531e1afca5a804"
+        },
+        {
+          "bytes": 1552,
+          "lines": 19,
+          "path": "registry/sources/nyfed.reference_rates.toml",
+          "sha256": "d43ae94e4d251871a4a9fab21d2f8ec578f60d79b748edaf1671d45e208e6505"
+        },
+        {
+          "bytes": 1565,
+          "lines": 19,
+          "path": "registry/sources/philly.rtdsm.toml",
+          "sha256": "ae0ad84c0e3709d350da2372f3a7e17bfcfb695c2a71e7cce3e50af4bcf99c94"
+        },
+        {
+          "bytes": 518,
+          "lines": 8,
+          "path": "registry/sources/synthetic.thin_slice.toml",
+          "sha256": "6fb44bdf8855426301c9267354bdd3474d569330bb44fc453de1872dab8fe537"
+        },
+        {
+          "bytes": 1433,
+          "lines": 1,
+          "path": "registry/trials.jsonl",
+          "sha256": "3c1681859a4addf7fe1bc069f2d825b4a67b9a65da063c5d19f780c8f107f5db"
+        }
+      ],
+      "generation": 2,
+      "name": "finance-research",
+      "role": "第二代：科研规程、U1 分段边界、数据源清单",
+      "url": "https://github.com/zhihong1357/finance-research"
+    },
+    {
+      "commit": "feb6a07b7a03bbfe7a6c2fccf2b28c1c97b537a7",
+      "files": [
+        {
+          "bytes": 2089,
+          "lines": 33,
+          "path": "AGENTS.md",
+          "sha256": "7ca24e69fecba1585595d9fb206361c77a5d586bf38d19aa05b6c496e602ba35"
+        },
+        {
+          "bytes": 13093,
+          "lines": 82,
+          "path": "README.md",
+          "sha256": "17830a9c8ef51005455458a71a3784f4f2c596eeaff2edbd33411b665a2d231b"
+        },
+        {
+          "bytes": 6709,
+          "lines": 146,
+          "path": "research/btc-dvol-013/README.md",
+          "sha256": "97944312fe1bce94e99b0934fc704e852f7049f3af07ff4138aad10ebaad3792"
+        },
+        {
+          "bytes": 1171,
+          "lines": 3,
+          "path": "research/btc-dvol-013/hypotheses/hypothesis-events.jsonl",
+          "sha256": "dbb9ebcc9ee0660aa51b4328bbb20648a317d27c6cc075a1c39d7b3c58199dcd"
+        },
+        {
+          "bytes": 3470,
+          "lines": 94,
+          "path": "research/btc-dvol-013/hypotheses/registrations/H0018/draft.json",
+          "sha256": "d9c8c9c8025ebd8cdcd9627e7b3f912f59526eb58ba6a1bba36f70fc33f4f196"
+        },
+        {
+          "bytes": 12455,
+          "lines": 1,
+          "path": "research/btc-dvol-013/hypotheses/registrations/H0018/v1.json",
+          "sha256": "fff6191c51914588db506d33c00fd4dc02207208452ebbea658c91a36968105b"
+        },
+        {
+          "bytes": 10180,
+          "lines": 1,
+          "path": "research/btc-dvol-013/trials.jsonl",
+          "sha256": "e8e0075593a27fd18a4347fdf85b5bb9ef5533fee7390a901aaf433d1e1ed13b"
+        },
+        {
+          "bytes": 3604,
+          "lines": 75,
+          "path": "research/btc-eth-001/README.md",
+          "sha256": "91b42ca5bb513f7405a2d300e19d713da5a9b32a1318b1fa3f82ebe75491d49c"
+        },
+        {
+          "bytes": 1152,
+          "lines": 3,
+          "path": "research/btc-eth-001/hypotheses/hypothesis-events.jsonl",
+          "sha256": "7e5610961ddf5a73a4a3b1b4bcfa80daffc7563b427ae11b6f0d1e437f3748b8"
+        },
+        {
+          "bytes": 212,
+          "lines": 1,
+          "path": "research/btc-eth-001/hypotheses/hypothesis-events.jsonl.anchor",
+          "sha256": "f0abbaf7e4a95499f13425d1bf9498b6c3ef76c155e429fd6bdecda533a49619"
+        },
+        {
+          "bytes": 4735,
+          "lines": 1,
+          "path": "research/btc-eth-001/hypotheses/registrations/H0001/v1.json",
+          "sha256": "e17eb7f1c2a6299641be31cac76902d227381f3b6006cc377845afad2b6efa53"
+        },
+        {
+          "bytes": 7918,
+          "lines": 1,
+          "path": "research/btc-eth-001/trials.jsonl",
+          "sha256": "d0e5e8e2524fb1176a9ebb42eccee41826c677fb14f6cb043679010019fd348f"
+        },
+        {
+          "bytes": 12841,
+          "lines": 247,
+          "path": "research/credit-spread-dgs10-012/README.md",
+          "sha256": "19fcbbee8e4855b04fbaf2c540138755124d9c7b7e40e2bb4769cd807ca11dda"
+        },
+        {
+          "bytes": 2444,
+          "lines": 5,
+          "path": "research/credit-spread-dgs10-012/hypotheses/hypothesis-events.jsonl",
+          "sha256": "5135eff019c1626a2634a630b6cf8f8d1215c260797bf99e994e74b57a83b4c4"
+        },
+        {
+          "bytes": 3478,
+          "lines": 94,
+          "path": "research/credit-spread-dgs10-012/hypotheses/registrations/H0017/draft.json",
+          "sha256": "9e0042ce76a9f2c0500de96176db5c1ab6d21c7ed1d1ce29e97b81e42f6cd731"
+        },
+        {
+          "bytes": 12977,
+          "lines": 1,
+          "path": "research/credit-spread-dgs10-012/hypotheses/registrations/H0017/v1.json",
+          "sha256": "f3406e22f49c0357dd022db36f9fa37e715cb4e6879326280621b5402bf6ebd3"
+        },
+        {
+          "bytes": 14009,
+          "lines": 1,
+          "path": "research/credit-spread-dgs10-012/hypotheses/registrations/H0017/v2.json",
+          "sha256": "65fac50a0a25cc9885d8fa0dbe0bcc6a48d379c4d20f95e82da6d0845a0c8692"
+        },
+        {
+          "bytes": 13302,
+          "lines": 1,
+          "path": "research/credit-spread-dgs10-012/trials.jsonl",
+          "sha256": "347295cd30f5bb3e194cf8fd10d9ba94be2108889c74dc788d0f4ab1803e11b3"
+        },
+        {
+          "bytes": 7233,
+          "lines": 154,
+          "path": "research/credit-spread-spx-008/README.md",
+          "sha256": "20baa67db4d9e999e1cc68b60cd51bf435fbf9a5e6818784eecde0cc7bbefff3"
+        },
+        {
+          "bytes": 1222,
+          "lines": 3,
+          "path": "research/credit-spread-spx-008/hypotheses/hypothesis-events.jsonl",
+          "sha256": "3ecb1560c1a7429a1d65df9657c65cd8c2e829f8a00c05904026e143273b9326"
+        },
+        {
+          "bytes": 3461,
+          "lines": 94,
+          "path": "research/credit-spread-spx-008/hypotheses/registrations/H0013/draft.json",
+          "sha256": "22e90ed80c04ea8fac54bff788ed005c5a6d0ef3b50efcfbe7d62826e0dd9c03"
+        },
+        {
+          "bytes": 7993,
+          "lines": 1,
+          "path": "research/credit-spread-spx-008/hypotheses/registrations/H0013/v1.json",
+          "sha256": "77b62fcf308b670f779d02bb8d081abfee5c09f5f61ba110fae0e6cdd4fc3abb"
+        },
+        {
+          "bytes": 10939,
+          "lines": 1,
+          "path": "research/credit-spread-spx-008/trials.jsonl",
+          "sha256": "ed1fb8eec4076de8a39bde6294427154cb3bf4264a8ac0c7abeb21fe7c89f117"
+        },
+        {
+          "bytes": 7947,
+          "lines": 168,
+          "path": "research/credit-spread-tyvix-009/README.md",
+          "sha256": "1c332e5e8cd472bc97796d57107b18cea6268949eccdbe1c7af479bc6f448c1f"
+        },
+        {
+          "bytes": 1121,
+          "lines": 3,
+          "path": "research/credit-spread-tyvix-009/hypotheses/hypothesis-events.jsonl",
+          "sha256": "491f3cc750c53d49df7afa0ceac4a56c58c2ba25558bb1775d826eb5e8a7fd03"
+        },
+        {
+          "bytes": 3505,
+          "lines": 97,
+          "path": "research/credit-spread-tyvix-009/hypotheses/registrations/H0014/draft.json",
+          "sha256": "c640876163ddb8ec7e4d894cf75bad7b4ce206bf41b69d4fd929ebab0a1a4dcc"
+        },
+        {
+          "bytes": 9155,
+          "lines": 1,
+          "path": "research/credit-spread-tyvix-009/hypotheses/registrations/H0014/v1.json",
+          "sha256": "167f191ee2ffb56020ff5a54139f634e4aa349ebca573294aa80d1862db85e62"
+        },
+        {
+          "bytes": 10332,
+          "lines": 1,
+          "path": "research/credit-spread-tyvix-009/trials.jsonl",
+          "sha256": "2ef8fc7b001cc5931e20772a3b0231aac2f19d49098a37c383f2fce0c01a9c7f"
+        },
+        {
+          "bytes": 8338,
+          "lines": 174,
+          "path": "research/credit-spread-vix-010/README.md",
+          "sha256": "ad64f5c073fc2b4ee60b7816472c6a5bb8048a4305f3e69217d12805ed547d22"
+        },
+        {
+          "bytes": 1121,
+          "lines": 3,
+          "path": "research/credit-spread-vix-010/hypotheses/hypothesis-events.jsonl",
+          "sha256": "c6cafe15e39dc582a83493c835e3d5c780ec5630963475ecf094614641882594"
+        },
+        {
+          "bytes": 3488,
+          "lines": 96,
+          "path": "research/credit-spread-vix-010/hypotheses/registrations/H0015/draft.json",
+          "sha256": "eb459f7f724a4e650edaabdc275f844faf698dae22213c5eeb1703a70466fa61"
+        },
+        {
+          "bytes": 9918,
+          "lines": 1,
+          "path": "research/credit-spread-vix-010/hypotheses/registrations/H0015/v1.json",
+          "sha256": "c9c74eff5e942e516d72f0e702aa4944d238372076f7177f5709a75dc3287381"
+        },
+        {
+          "bytes": 11670,
+          "lines": 1,
+          "path": "research/credit-spread-vix-010/trials.jsonl",
+          "sha256": "8763f28082bbe647c7775318dcd504c11d9a58684db46206d5cb208744353257"
+        },
+        {
+          "bytes": 8749,
+          "lines": 180,
+          "path": "research/credit-spread-vxn-011/README.md",
+          "sha256": "100dfc2be308e3271e6fa9f729a5dffbee07dfb6f443275f9b7f795fb79f3c91"
+        },
+        {
+          "bytes": 1183,
+          "lines": 3,
+          "path": "research/credit-spread-vxn-011/hypotheses/hypothesis-events.jsonl",
+          "sha256": "bf49420b8e8d59e07a87695816fb8f7a66dc917e5b176145245bdda258c69a9b"
+        },
+        {
+          "bytes": 3459,
+          "lines": 94,
+          "path": "research/credit-spread-vxn-011/hypotheses/registrations/H0016/draft.json",
+          "sha256": "e0408d11556e6e6df66f8ca669b92920552d2c04c99d463d8463c3e802d9fe98"
+        },
+        {
+          "bytes": 10700,
+          "lines": 1,
+          "path": "research/credit-spread-vxn-011/hypotheses/registrations/H0016/v1.json",
+          "sha256": "7dbe464fcbb8faa77bea8fe090d722e83accb3c8850168136dd46d4bc7d23f47"
+        },
+        {
+          "bytes": 11636,
+          "lines": 1,
+          "path": "research/credit-spread-vxn-011/trials.jsonl",
+          "sha256": "7ef99f5d8a213418bd1416052ed04d1dfa7de4ccf3d591dda7c925cfa3dabfcd"
+        },
+        {
+          "bytes": 1683,
+          "lines": 41,
+          "path": "research/decision-records/README.md",
+          "sha256": "410f544c440d4e19dafe54b631a477347356a7012f604123d0a62f68944e2da6"
+        },
+        {
+          "bytes": 3666,
+          "lines": 98,
+          "path": "research/decision-records/records/DR-E0023.json",
+          "sha256": "505c89e11d6323225c4893528ea0da70923f549653a95a84962f5d4d9ff85038"
+        },
+        {
+          "bytes": 3358,
+          "lines": 83,
+          "path": "research/decision-records/records/DR-E0026.json",
+          "sha256": "f69893d84a55c4450b733a998646e13c04d522faa033682737cebdc3317c14dd"
+        },
+        {
+          "bytes": 3361,
+          "lines": 81,
+          "path": "research/decision-records/records/DR-E0030.json",
+          "sha256": "9ee7fa397d5e882a6da82a8f128311e6b3155b2a9ee89a1b3d89d003db124d09"
+        },
+        {
+          "bytes": 3038,
+          "lines": 79,
+          "path": "research/decision-records/records/DR-E0031.json",
+          "sha256": "5f86876ea81af328e3eddf5f9c3315eb4cd4679b3ce031d34bf1016324eef7a1"
+        },
+        {
+          "bytes": 3606,
+          "lines": 98,
+          "path": "research/decision-records/records/DR-E0032.json",
+          "sha256": "5b5b6459df2036c681f905d45a14f774b644be7868c8601c3f53f6265f8d2eca"
+        },
+        {
+          "bytes": 3709,
+          "lines": 98,
+          "path": "research/decision-records/records/DR-E0033.json",
+          "sha256": "b334cc357e8f2cbe266783430b10d620f43dfcf44a6e6201c54c4a53cea9de90"
+        },
+        {
+          "bytes": 3387,
+          "lines": 89,
+          "path": "research/decision-records/records/DR-H0001.json",
+          "sha256": "45e97651f74c50d1176df513a9b85de88f445c6e49b19a4af78e8e8196b28363"
+        },
+        {
+          "bytes": 3722,
+          "lines": 98,
+          "path": "research/decision-records/records/DR-H0002.json",
+          "sha256": "80d83573b32496f61e42743d0091e261fc1eba5ec9cfe19c25dd2afb932076e3"
+        },
+        {
+          "bytes": 3458,
+          "lines": 88,
+          "path": "research/decision-records/records/DR-H0004.json",
+          "sha256": "bce009d7730e42bc95f959bce8f29c9863b079b231634265e985cfa4ccc0c1d5"
+        },
+        {
+          "bytes": 3639,
+          "lines": 91,
+          "path": "research/decision-records/records/DR-H0005.json",
+          "sha256": "655256a7ab3b7ee83c2786bd26528523c7803f15ea392d0289859dcb4d1826c8"
+        },
+        {
+          "bytes": 2759,
+          "lines": 72,
+          "path": "research/decision-records/records/DR-H0006.json",
+          "sha256": "0750d8c51852055a54317c6f623407cc52670b57ea5a9b33c7cf3fc5c06ab00e"
+        },
+        {
+          "bytes": 3133,
+          "lines": 89,
+          "path": "research/decision-records/records/DR-H0007.json",
+          "sha256": "0ac3da60721b2c772ecc623a928f42266e93ed7d4fd665af226a3568f85a1bf1"
+        },
+        {
+          "bytes": 2658,
+          "lines": 75,
+          "path": "research/decision-records/records/DR-H0008.json",
+          "sha256": "2f1670f2b93ce71b855c31d351ddb9b81585bd2fded88af79d158044a539458d"
+        },
+        {
+          "bytes": 3557,
+          "lines": 91,
+          "path": "research/decision-records/records/DR-H0009.json",
+          "sha256": "dabfee829080eb500203aa952eb4c8905415d47400e888467b9f90af453de5a4"
+        },
+        {
+          "bytes": 3530,
+          "lines": 88,
+          "path": "research/decision-records/records/DR-H0012.json",
+          "sha256": "1ecc8ce296e268ae1c2a7fc96eb53f8a6c4dba0dd6ca00471ba23d0d939d35df"
+        },
+        {
+          "bytes": 3367,
+          "lines": 77,
+          "path": "research/decision-records/records/DR-H0013.json",
+          "sha256": "82864a9123f43c075996439f7236f26aa063806b21655541af0f1530285cb758"
+        },
+        {
+          "bytes": 3639,
+          "lines": 77,
+          "path": "research/decision-records/records/DR-H0014.json",
+          "sha256": "7269227f9b2ca570b99aa96541e8e7e983f8160ab4de72d086ccafb3133a39ca"
+        },
+        {
+          "bytes": 3549,
+          "lines": 76,
+          "path": "research/decision-records/records/DR-H0015.json",
+          "sha256": "07b437e21ed2c2ca52a59cd25437a39b797a3a847558283b44a6487ea9a284f6"
+        },
+        {
+          "bytes": 3761,
+          "lines": 77,
+          "path": "research/decision-records/records/DR-H0016.json",
+          "sha256": "2d22e42ddbccdac98d76fc7c4a90ce98afb7dbb55be36e6b1e46e04ae21ec354"
+        },
+        {
+          "bytes": 4011,
+          "lines": 78,
+          "path": "research/decision-records/records/DR-H0017.json",
+          "sha256": "639f37449c7533a140b6d91a2b78f6522bf922c0084f5c10e2595edda8adef9e"
+        },
+        {
+          "bytes": 4295,
+          "lines": 79,
+          "path": "research/decision-records/records/DR-H0018.json",
+          "sha256": "9000598245f97f46b9e6fa0e508aa9376f4a9dd4c2c2c3249478abbb1490b072"
+        },
+        {
+          "bytes": 2253,
+          "lines": 6,
+          "path": "research/fomc-event-study-005/hypotheses/hypothesis-events.jsonl",
+          "sha256": "7670e4eab5acfe1d100bf83acc3483433fbf8f434077c24eabd84e6797585c9c"
+        },
+        {
+          "bytes": 6958,
+          "lines": 1,
+          "path": "research/fomc-event-study-005/hypotheses/registrations/H0007/v1.json",
+          "sha256": "8f664f764c2d56a8bed3043a1239afa54784a319dd0b56f5669c0133ca3684d1"
+        },
+        {
+          "bytes": 6487,
+          "lines": 1,
+          "path": "research/fomc-event-study-005/hypotheses/registrations/H0008/v1.json",
+          "sha256": "35d22d3f1fea609e0cfd700783c3d987579b98db7f9a3413535c35c5f6649c10"
+        },
+        {
+          "bytes": 84033,
+          "lines": 3,
+          "path": "research/fomc-event-study-005/trials.jsonl",
+          "sha256": "fedd5971a54a8980a2cdf0f4f3c50cddc3c1c1429feb9e0d3ecb490a51486439"
+        },
+        {
+          "bytes": 4483,
+          "lines": 100,
+          "path": "research/graph/README.md",
+          "sha256": "33d72920bf64833c7e102c886e4686587733737967f425afca53078e5026f362"
+        },
+        {
+          "bytes": 4946,
+          "lines": 100,
+          "path": "research/lowvol-002/README.md",
+          "sha256": "b3a66e0eb327ca499e73624aba34a170ade3837d8898b82eacb5c5a06d439004"
+        },
+        {
+          "bytes": 1534,
+          "lines": 4,
+          "path": "research/lowvol-002/hypotheses/hypothesis-events.jsonl",
+          "sha256": "962c96ee5d8bedcffc7679a9bb825f120290d7acc6bbd1726a6a828f2b6e5d5e"
+        },
+        {
+          "bytes": 212,
+          "lines": 1,
+          "path": "research/lowvol-002/hypotheses/hypothesis-events.jsonl.anchor",
+          "sha256": "5d5e62bb583109a6c316dc5dbf92b6a18a2de991a5c886610423d23367beb1ea"
+        },
+        {
+          "bytes": 6669,
+          "lines": 1,
+          "path": "research/lowvol-002/hypotheses/registrations/H0002/v1.json",
+          "sha256": "f6bb3074d05b1af1a0140a87bbae85550c44e029e24027156336271508d15af8"
+        },
+        {
+          "bytes": 4746,
+          "lines": 1,
+          "path": "research/lowvol-002/hypotheses/registrations/H0003/v1.json",
+          "sha256": "e85a1caaa47c7dc538eb24c6918a7f2f85b614c2fe900b0e8f5b39ecc5220952"
+        },
+        {
+          "bytes": 10040,
+          "lines": 1,
+          "path": "research/lowvol-002/trials.jsonl",
+          "sha256": "80194e7b707db9c9442c48c2a27d4fe820e35b473c1b3200480f6185f8f07756"
+        },
+        {
+          "bytes": 2264,
+          "lines": 6,
+          "path": "research/macro-windows-006/hypotheses/hypothesis-events.jsonl",
+          "sha256": "e0e83a65bab21a5c74bcfbff1e5c85600259c739b7c14af268921a86889e14a0"
+        },
+        {
+          "bytes": 212,
+          "lines": 1,
+          "path": "research/macro-windows-006/hypotheses/hypothesis-events.jsonl.anchor",
+          "sha256": "84d73697196f76f0dbee5a83fb68b7f3463d593d36fbd2eb20ac5111562ee03a"
+        },
+        {
+          "bytes": 7825,
+          "lines": 1,
+          "path": "research/macro-windows-006/hypotheses/registrations/H0009/v1.json",
+          "sha256": "395f7698283eb91493837f845ab9a443caf0eee6f9c5d353c2bd886f5b26d213"
+        },
+        {
+          "bytes": 6508,
+          "lines": 1,
+          "path": "research/macro-windows-006/hypotheses/registrations/H0010/v1.json",
+          "sha256": "f3456dcf7d1036a09525baa0e3404e1e777594754fbf0b9104b202c039122c7b"
+        },
+        {
+          "bytes": 18357,
+          "lines": 2,
+          "path": "research/macro-windows-006/trials.jsonl",
+          "sha256": "95c82e7554a3c0436e471ce1af3fdb0ef51474663ead996b2679d515eb3dbfb1"
+        },
+        {
+          "bytes": 4117,
+          "lines": 87,
+          "path": "research/move-vix-003/README.md",
+          "sha256": "52c702ad68ef39883552bcab02c7cf8216ff397a18fff63854385ee48d7a0e8a"
+        },
+        {
+          "bytes": 2354,
+          "lines": 5,
+          "path": "research/move-vix-003/hypotheses/hypothesis-events.jsonl",
+          "sha256": "2357fc19561daa58e6ffeb66ad9d32039fb0e3cd62825747f2c2a46bf5213944"
+        },
+        {
+          "bytes": 212,
+          "lines": 1,
+          "path": "research/move-vix-003/hypotheses/hypothesis-events.jsonl.anchor",
+          "sha256": "2c6913c9c1b40ac7ba165e63cd7a64c3d7f1d46db7b06335955e4f3350795ddb"
+        },
+        {
+          "bytes": 6681,
+          "lines": 1,
+          "path": "research/move-vix-003/hypotheses/registrations/H0004/v1.json",
+          "sha256": "4cecf67a5821604e8c8f7c172423393fc6cad225df10406dea2fb42629db4866"
+        },
+        {
+          "bytes": 8057,
+          "lines": 1,
+          "path": "research/move-vix-003/hypotheses/registrations/H0004/v2.json",
+          "sha256": "a241a4d54713539db5789dd1cb938b2d8f7514564987d62b35c932fec7dc648e"
+        },
+        {
+          "bytes": 12019,
+          "lines": 1,
+          "path": "research/move-vix-003/trials.jsonl",
+          "sha256": "bbd11be937b04b2d6a6f345398915ba134d539ef10eed2c4053d0867094c6910"
+        },
+        {
+          "bytes": 6533,
+          "lines": 132,
+          "path": "research/options-expiry-004/README.md",
+          "sha256": "186ed8714039a95deffccce9775040b919ca9afb2839f2442ac0ec1fffe95d25"
+        },
+        {
+          "bytes": 2430,
+          "lines": 6,
+          "path": "research/options-expiry-004/hypotheses/hypothesis-events.jsonl",
+          "sha256": "0487fdd2d315d27fe52fdc4baeace8df5f829836769d483a592a9f56a1c9c11a"
+        },
+        {
+          "bytes": 212,
+          "lines": 1,
+          "path": "research/options-expiry-004/hypotheses/hypothesis-events.jsonl.anchor",
+          "sha256": "e7744a436771c8cb8c253f1075d097328b1c4742a21e0019ea83b2b5ba5a82b3"
+        },
+        {
+          "bytes": 7047,
+          "lines": 1,
+          "path": "research/options-expiry-004/hypotheses/registrations/H0005/v1.json",
+          "sha256": "b502396ceb694d3cb138a063adeeac9ba0edeae3e139a9acb321b658aeaf776f"
+        },
+        {
+          "bytes": 5588,
+          "lines": 1,
+          "path": "research/options-expiry-004/hypotheses/registrations/H0006/v1.json",
+          "sha256": "e065716721e1105fe2a4f68733f26688a522cd3c112b2d72afa8f949094a1816"
+        },
+        {
+          "bytes": 20764,
+          "lines": 3,
+          "path": "research/options-expiry-004/trials.jsonl",
+          "sha256": "dd953fc9fa8fe931d89f2ba7b0b79cc4f11e580e77bd61108dfdb11cf243e1c5"
+        },
+        {
+          "bytes": 2164,
+          "lines": 6,
+          "path": "research/publication-lag-007/hypotheses/hypothesis-events.jsonl",
+          "sha256": "db009d08f75f8014f546c8a1729a6e20daf6d5cb77495db7246129a9ae22154a"
+        },
+        {
+          "bytes": 212,
+          "lines": 1,
+          "path": "research/publication-lag-007/hypotheses/hypothesis-events.jsonl.anchor",
+          "sha256": "ed0f34ac61b0b6b1e5a9e7c63794b6cc35ac1a813bfbe105ef664210f2ecfe22"
+        },
+        {
+          "bytes": 8476,
+          "lines": 1,
+          "path": "research/publication-lag-007/hypotheses/registrations/H0011/v1.json",
+          "sha256": "d4890359485faf5d4454221d5bdfa34fa99eda46006cca616833d04ec5b081a3"
+        },
+        {
+          "bytes": 7621,
+          "lines": 1,
+          "path": "research/publication-lag-007/hypotheses/registrations/H0012/v1.json",
+          "sha256": "eab69b2f1150cdd3b974c2185ccdcbe7094fd086f03c904573074840c05bee3d"
+        },
+        {
+          "bytes": 53735,
+          "lines": 3,
+          "path": "research/publication-lag-007/trials.jsonl",
+          "sha256": "d02acf053572dc3ed98ee9889f06d805106d4c540cb9a6e99665e0662dcbaaad"
+        },
+        {
+          "bytes": 3101,
+          "lines": 86,
+          "path": "research/scaffold-6c/generated/research/baa-spx-transmission-008/README.md",
+          "sha256": "9d186c2846c3c5793116c3ac5f29b7ba7fc9483d6ff2336a5a64b498eb5b42dc"
+        },
+        {
+          "bytes": 3461,
+          "lines": 94,
+          "path": "research/scaffold-6c/generated/research/baa-spx-transmission-008/hypotheses/registrations/H9001/draft.json",
+          "sha256": "0ae2f8723bf16a5f6ade9d1c58f4b16897fb91dec715eda85a87c7a89de8486a"
+        },
+        {
+          "bytes": 2970,
+          "lines": 64,
+          "path": "research/statistical-audit-2b/README.md",
+          "sha256": "b8747b7bdd5e365cfb816c4ec1c123a6614eef920b017065e30c0570c83fd3f8"
+        }
+      ],
+      "generation": 2,
+      "name": "myquant",
+      "role": "第二代：13 项研究的试验账本与假说事件",
+      "url": "https://github.com/zhihong1357/myquant"
+    }
+  ]
+}
