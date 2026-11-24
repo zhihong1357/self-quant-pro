@@ -2,6 +2,21 @@
 
 每次会话结束时更新这一页：最新的写在最上面，旧的往下推。只写下一个会话需要知道的事。
 
+## 2026-11-24 · Claude（Opus 5.5）· G0 收尾
+
+**做了什么**
+- G0 验收完成：推送保护和密钥扫描已打开；只允许合并提交；分支规则要求 `tests` 和 `rules` 两个检查，来源都是 GitHub Actions。都用 GitHub 接口核实过。
+- 第一代的录制任务都还在正常跑：fakeout-backtest（私有，GEX 每日记录，最近一次 2026-11-23）、orderflow（私有，`gex-data` 和 `lab-data` 分支，最近一次 2026-11-24）。两个私有仓库过去 30 天约用 210 分钟 Actions，远低于免费额度。
+- 决策 0011：由第三方数据算出的数值不进公开仓库；继承记录重新生成，只保留标识、日期、状态和指纹；新增 `derived-results` 检查；记下 Binance Vision 条款的核对结论（可以研究，不能用于实盘）。
+
+**下一步（12 月 8 日之前，不依赖 finance-research 的决定）**
+1. 研究可行性地图：候选假说族 × 功效门槛 × 广度 × 数据成本 × 条款，决定 G1 的最小数据切片。
+2. 文献综述交给 Gemini Deep Research（所有者执行，提示词由 Claude 给出），结果存进仓库前先抽查来源。
+3. 核对 Binance 接口、Bybit、OKX、Hyperliquid 的数据条款，重点是实盘用途。
+
+**踩到的坑**
+- 这个会话里 `gh pr create` 走的 GraphQL 被拦，开 PR 要用 `gh api repos/<owner>/<repo>/pulls`。
+
 ## 2026-11-24 · Claude（Opus 5.5）· G0（合并之后）
 
 **做了什么**

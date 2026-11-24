@@ -61,6 +61,12 @@ patterns = [
   { name = "写死在代码里的密钥", regex = '''(?i)\b(api[_-]?key|api[_-]?secret|secret[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|passphrase|password)\b["']?\s*[:=]\s*["'][^"'\s]{16,}["']''' },
 ]
 
+[derived]
+# 由第三方数据算出的数值（指标、结果、预测）不进公开仓库，存放在私有存储桶（决策 0011）。
+# registry/ 下 JSONL 记录的顶层不允许出现这些字段；公开账本只记指纹。
+jsonl_globs = ["registry/*.jsonl"]
+forbidden_keys = ["metrics", "result", "results", "returns", "pnl", "equity", "sharpe", "positions", "predictions"]
+
 [history]
 ledger_globs = ["registry/ledger/*.jsonl"]
 frozen_globs = ["registry/inherited/*", "registry/universes/*", "config/*", ".github/workflows/*"]

@@ -233,4 +233,28 @@ def check(repo: Repo, cfg: Governance, paths: list[str]) -> list[Violation]:
             Violation("ledger-chain", path, problem)
             for problem in ledger.verify(data.decode("utf-8", "replace"))
         ]
+
+    for path in (p for p in paths if matches(p, cfg.derived_jsonl_globs)):
+        found += _derived(repo, path, cfg.derived_forbidden_keys)
+    return found
+
+
+def _derived(repo: Repo, path: str, forbidden: tuple[str, ...]) -> list[Violation]:
+    found = []
+    lines = (repo.read(path) or b"").decode("utf-8", "replace").splitlines()
+    for number, line in enumerate(lines, start=1):
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue  # malformed ledger lines are reported by ledger-chain
+        keys = sorted(set(record) & set(forbidden)) if isinstance(record, dict) else []
+        if keys:
+            found.append(
+                Violation(
+                    "derived-results",
+                    path,
+                    f"第 {number} 行带有数值结果字段 {', '.join(keys)}。"
+                    "由第三方数据算出的数值放私有存储桶，公开仓库只记指纹",
+                )
+            )
     return found
