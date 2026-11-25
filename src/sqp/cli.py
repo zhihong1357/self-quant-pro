@@ -1,16 +1,19 @@
 """Command line: `sqp check`, `sqp power`, `sqp ledger append`, `sqp inherit scan|verify`,
-`sqp storage check`."""
+`sqp storage check`, `sqp data sync`."""
 
 from __future__ import annotations
 
 import argparse
 import json
+import secrets
 import sys
 import tomllib
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sqp import inherit, ledger, stats, storage
 from sqp.checks import run_all
+from sqp.data import vision
 from sqp.repo import GitError, Repo
 
 
@@ -103,6 +106,67 @@ def _storage_check(args: argparse.Namespace) -> int:
     return 0
 
 
+def _mb(n: int) -> str:
+    return f"{n / 1e6:,.1f} MB"
+
+
+def _data_sync(args: argparse.Namespace) -> int:
+    root = Path(args.repo)
+    source = vision.load_source(root)
+    only = {s.strip() for s in args.symbols.split(",") if s.strip()} if args.symbols else None
+    if args.local:
+        local = storage.LocalStore(Path(args.local))
+        factory = lambda: local  # noqa: E731
+        limit = 10**15  # this machine's disk is not billed
+    else:
+        cfg = storage.load_config(root)
+        factory = lambda: storage.GcsStore(cfg["bucket"], cfg["project_id"])  # noqa: E731
+        limit = storage.max_bucket_bytes(root)
+    store = factory()
+    sizes = store.sizes()
+    total = sum(sizes.values())
+    symbols = vision.resolve_symbols(vision.http_get, source, only)
+    remotes = vision.list_upstream(vision.http_get, source, symbols, args.workers)
+    stored = {k: v for k, v in sizes.items() if k.startswith(vision.RAW_PREFIX)}
+    plan = vision.make_plan(remotes, stored, vision.recorded_etags(store), limit - total)
+    sets = "，".join(f"{name} {len(names)} 个" for name, names in symbols.items())
+    print(f"合约：{sets}")
+    print(f"上游归档：{plan.upstream} 个文件，共 {_mb(plan.upstream_bytes)}")
+    print(f"已存：{plan.present} 个；本次要下载：{len(plan.fetch)} 个")
+    if plan.changed:
+        print(f"上游替换过的已存文件：{len(plan.changed)} 个（不覆盖，记进清单）")
+    if plan.capped:
+        print(f"超出存储上限、这次不下载：{plan.capped} 个（上限 {_mb(limit)}）")
+    if args.dry_run:
+        print("只列计划，没有下载。")
+        return 0
+    run_id = f"{datetime.now(UTC):%Y%m%dT%H%M%SZ}-{secrets.token_hex(3)}"
+    step = max(1, len(plan.fetch) // 10)
+
+    def progress(done: int) -> None:
+        if done % step == 0 or done == len(plan.fetch):
+            print(f"进度：{done}/{len(plan.fetch)}", flush=True)
+
+    outcome = vision.mirror(
+        plan,
+        fetch=vision.http_get,
+        site=source.site,
+        store_factory=factory,
+        run_id=run_id,
+        workers=args.workers,
+        progress=progress,
+    )
+    print(f"已下载并校验：{outcome.stored} 个，共 {_mb(outcome.stored_bytes)}")
+    if outcome.already:
+        print(f"下载期间已被写入、跳过：{outcome.already} 个")
+    print(f"存储桶合计：约 {_mb(total + outcome.stored_bytes)}")
+    if outcome.failed:
+        print(f"失败：{len(outcome.failed)} 个。前几个：")
+        for line in outcome.failed[:5]:
+            print(f"  {line}")
+    return 1 if outcome.failed or plan.capped else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="sqp", description="self-quant-pro：治理检查与研究工具")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -148,6 +212,16 @@ def main(argv: list[str] | None = None) -> int:
         help="同时确认权限层拒绝覆盖和删除；只在 GitHub 的数据工作流里用",
     )
     c.set_defaults(func=_storage_check)
+
+    p = sub.add_parser("data", help="数据层")
+    data_sub = p.add_subparsers(dest="data_command", required=True)
+    d = data_sub.add_parser("sync", help="把 Binance 公开数据站的月度归档原样存进存储（只增不改）")
+    d.add_argument("--repo", default=".", help="读哪个仓库的数据源登记和存储配置")
+    d.add_argument("--local", help="存进这个本机目录，而不是谷歌云存储桶")
+    d.add_argument("--symbols", help="只同步这些永续合约（逗号分隔）及其现货，默认全部")
+    d.add_argument("--dry-run", action="store_true", help="只列出计划，不下载")
+    d.add_argument("--workers", type=int, default=16, help="并发数")
+    d.set_defaults(func=_data_sync)
 
     args = parser.parse_args(argv)
     return args.func(args)

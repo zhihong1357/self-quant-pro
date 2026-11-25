@@ -5,3 +5,8 @@
 project_id = "self-quant-pro"
 workload_identity_provider = "projects/207119464670/locations/global/workloadIdentityPools/github/providers/self-quant-pro"
 bucket = "self-quant-pro-sqp-data"
+
+[limits]
+# Downloads stop before the bucket would pass this size (decision 0018). The
+# always-free tier covers 5 GB-months of Standard storage in us-central1.
+max_bucket_bytes = 4_500_000_000

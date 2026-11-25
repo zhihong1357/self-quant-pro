@@ -28,13 +28,13 @@ G0 只有治理层。其余各层按[路线图](roadmap.md)逐个阶段加入，
 | `STAGE` | 当前阶段 |
 | `config/` | 治理、科研规程、继承规则、谷歌云存储的配置（冻结） |
 | `docs/` | 宪章、规程、架构、路线图、决策记录等 |
-| `registry/` | 继承记录、研究宇宙、假说卡、三本账 |
-| `src/sqp/` | 治理检查与研究工具；`storage.py` 是只增不改的存储层（本机目录或谷歌云存储桶） |
+| `registry/` | 继承记录、研究宇宙、假说卡、三本账、数据源登记（`registry/sources/`） |
+| `src/sqp/` | 治理检查与研究工具；`storage.py` 是只增不改的存储层（本机目录或谷歌云存储桶）；`data/` 是数据层（G1） |
 | `scripts/gcp/` | 所有者在 Cloud Shell 里运行的一次性设置脚本（[开通谷歌云](gcp-setup.md)） |
 | `tests/` | 测试，含 G0 验收测试 `test_acceptance.py` |
-| `.github/` | 持续集成、PR 模板、手动触发的环境自检 `env-check.yml` |
+| `.github/` | 持续集成、PR 模板、手动触发的环境自检 `env-check.yml`、每周的数据同步 `data-sync.yml` |
 
-计划：`src/sqp/data/`（G1）、`src/sqp/research/`（G2）、`src/sqp/model/` 与 `src/sqp/capacity/`（G4）、`deploy/`（G5）、`src/sqp/execution/`（G7）。
+计划：`src/sqp/research/`（G2）、`src/sqp/model/` 与 `src/sqp/capacity/`（G4）、`deploy/`（G5）、`src/sqp/execution/`（G7）。
 
 ## 3. 环境分工
 

@@ -21,3 +21,4 @@
 | [0015](0015-g1-starts-now.md) | G1 现在开始，不等 finance-research；谷歌云只开存储，身份只能新建和读取 |
 | [0016](0016-model-knowledge-counts-as-exposure.md) | 预训练语言模型见过的数据也算暴露：语言模型特征在 U1 上只能前向检验 |
 | [0017](0017-storage-config-and-env-check.md) | 存储配置写进仓库；新增手动触发的环境自检工作流 |
+| [0018](0018-mirror-binance-vision.md) | Binance 公开归档原样存进存储桶，逐个校验；每周的数据同步工作流 |
