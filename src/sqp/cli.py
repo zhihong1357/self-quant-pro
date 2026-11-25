@@ -214,34 +214,43 @@ def _trial_run(args: argparse.Namespace) -> int:
     root = Path(args.repo)
     factory, _ = _store_factory(args)
     store = factory()
-    try:
-        wanted = [args.trial] if args.trial else run.pending(root, store)
-    except run.TrialRefused as exc:
-        print(f"拒绝：{exc}")
-        return 1
-    if not wanted:
-        print("没有等着跑的试验卡。")
-        return 0
-    failed = 0
-    for tid in wanted:
+    failed, attempted = 0, set()
+    while True:
+        # Without a number, run every card that can run; a repeat becomes runnable once
+        # its original has finished, so look again until nothing new is runnable.
         try:
-            done = run.run_trial(root, store, tid)
+            wanted = [args.trial] if args.trial else run.pending(root, store)
         except run.TrialRefused as exc:
-            print(f"{tid} 拒绝：{exc}")
-            failed += 1
-            continue
-        except Exception as exc:  # only the type: a message may carry numbers (decision 0011)
-            print(f"{tid} 出错：{type(exc).__name__}。这次已开始，计入试验次数（决策 0025）")
-            for frame in traceback.extract_tb(exc.__traceback__):  # where, never the values
-                print(f"  {frame.filename}:{frame.lineno} {frame.name}")
-            failed += 1
-            continue
-        for line in done.lines:
-            print(line)
-        for alarm in done.alarms:
-            print(f"报警：{alarm}")
-        failed += bool(done.alarms)
+            print(f"拒绝：{exc}")
+            return 1
+        wanted = [tid for tid in wanted if tid not in attempted]
+        if not wanted:
+            break
+        for tid in wanted:
+            attempted.add(tid)
+            failed += _run_one(root, store, tid)
+    if not attempted:
+        print("没有等着跑的试验卡。")
     return 1 if failed else 0
+
+
+def _run_one(root: Path, store: storage.Store, tid: str) -> int:
+    """Run one card and print only names and fingerprints; 1 if it did not finish cleanly."""
+    try:
+        done = run.run_trial(root, store, tid)
+    except run.TrialRefused as exc:
+        print(f"{tid} 拒绝：{exc}")
+        return 1
+    except Exception as exc:  # only the type: a message may carry numbers (decision 0011)
+        print(f"{tid} 出错：{type(exc).__name__}。这次已开始，计入试验次数（决策 0025）")
+        for frame in traceback.extract_tb(exc.__traceback__):  # where, never the values
+            print(f"  {frame.filename}:{frame.lineno} {frame.name}")
+        return 1
+    for line in done.lines:
+        print(line)
+    for alarm in done.alarms:
+        print(f"报警：{alarm}")
+    return 1 if done.alarms else 0
 
 
 def _data_profile(args: argparse.Namespace) -> int:
