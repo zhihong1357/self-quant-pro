@@ -92,6 +92,7 @@ G7 之前不开常驻虚拟机。部署流程：PR 合并 → 持续集成通过
 | `secret-history` | PR 里每一次提交加入过的像密钥的内容 | `checks/secrets.py` |
 | `order-code` | G7 之前的下单相关代码 | `checks/code.py` |
 | `never-code` | 任何阶段的提币和资金划转代码 | `checks/code.py` |
+| `research-boundary` | `src/sqp/research/studies/` 里的研究代码只能通过时点接口读数据：导入用白名单；不能碰下划线开头的名字、读写文件的函数、`open`、`eval`、`getattr` 这类内置函数（决策 0022） | `checks/research.py` |
 | `stage-value` | `STAGE` 的取值 | `checks/registry.py` |
 | `universe-schema` | 研究宇宙的字段与分段连续性 | `checks/registry.py` |
 | `universe-exposure` | 前代看过的数据有没有声明 | `checks/registry.py` |

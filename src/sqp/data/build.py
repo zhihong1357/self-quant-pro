@@ -3,13 +3,19 @@
 Layout, per dataset and month:
 
     datasets/binance-vision/<dataset>/v1/<YYYY-MM>.rNN.parquet
+    datasets/binance-vision/<dataset>/v1/<YYYY-MM>.rNN.sha256.json
     datasets/binance-vision/<dataset>/v1/<YYYY-MM>.rNN.inputs.json
 
-A part is written parquet first, then its inputs file, which lists the raw
-archives it holds; a part without an inputs file is ignored by readers and by
-the next build. Parts are append-only: archives mirrored after a month was built
-go into the next part. Archives with identical content (the same contract under
-an old and a SETTLED folder name) are kept once.
+A part is written parquet first, then its checksum file (the SHA-256 of the
+parquet bytes, which readers check, local caches included), then its inputs
+file, which lists the raw archives it holds; a part without an inputs file is
+ignored by readers and by the next build. Parts built before checksum files
+existed get one from `backfill_checksums`: objects are never overwritten, so
+the bytes hashed then are the bytes written at build time.
+
+Parts are append-only: archives mirrored after a month was built go into the
+next part. Archives with identical content (the same contract under an old and a
+SETTLED folder name) are kept once.
 """
 
 from __future__ import annotations
@@ -28,12 +34,23 @@ import polars as pl
 
 from sqp.data.parse import parse
 from sqp.data.vision import RAW_PREFIX, Source
-from sqp.storage import Store
+from sqp.storage import ObjectExists, Store
 
 DATASET_PREFIX = "datasets/binance-vision/"
 VERSION = "v1"
 _PART = re.compile(r"/(?P<month>\d{4}-\d{2})\.r(?P<part>\d{2,})\.(?P<ext>parquet|inputs\.json)$")
 _TIME = {"klines": "open_time", "funding": "calc_time"}
+CHECKSUM_SUFFIX = ".sha256.json"
+
+
+def checksum_doc(key: str, data: bytes) -> bytes:
+    """The checksum file of a parquet part: its key, size and SHA-256."""
+    doc = {"key": key, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+    return json.dumps(doc, sort_keys=True).encode()
+
+
+def checksum_key(parquet_key: str) -> str:
+    return parquet_key.removesuffix(".parquet") + CHECKSUM_SUFFIX
 
 
 def month_prefix(dataset: str, month: str) -> str:
@@ -79,6 +96,7 @@ class BuildOutcome:
     duplicates: int = 0
     bytes: int = 0
     capped: list[str] = field(default_factory=list)
+    checksums: int = 0  # checksum files added for parts built before they existed
 
 
 def build(
@@ -138,15 +156,43 @@ def build(
                     "duplicates": duplicates,
                 }
                 body = json.dumps(doc, sort_keys=True, indent=1).encode()
-                if len(buffer.getvalue()) + len(body) > room:
+                stem = f"{month_prefix(ds['id'], month)}.r{state['next']:02d}"
+                parquet = buffer.getvalue() if table is not None else b""
+                checksum = checksum_doc(stem + ".parquet", parquet) if parquet else b""
+                written = len(parquet) + len(checksum) + len(body)
+                if written > room:
                     outcome.capped.append(month)
                     continue
-                stem = f"{month_prefix(ds['id'], month)}.r{state['next']:02d}"
-                if table is not None:
-                    store().put(stem + ".parquet", buffer.getvalue())
+                if parquet:
+                    store().put(stem + ".parquet", parquet)
+                    store().put(checksum_key(stem + ".parquet"), checksum)
                 store().put(stem + ".inputs.json", body)
-                room -= len(buffer.getvalue()) + len(body)
+                room -= written
                 outcome.parts += 1
                 outcome.rows += doc["rows"]
-                outcome.bytes += len(buffer.getvalue()) + len(body)
+                outcome.bytes += written
+            outcome.checksums = backfill_checksums(store, ds["id"], pool)
     return outcomes
+
+
+def backfill_checksums(store: Callable[[], Store], dataset: str, pool: ThreadPoolExecutor) -> int:
+    """Write the missing checksum file of every committed parquet part; return how many.
+
+    Each file is about 150 bytes, so this does not check the storage limit."""
+    keys = set(store().keys(f"{DATASET_PREFIX}{dataset}/{VERSION}/"))
+    missing = sorted(
+        k
+        for k in keys
+        if k.endswith(".parquet")
+        and k.removesuffix(".parquet") + ".inputs.json" in keys
+        and checksum_key(k) not in keys
+    )
+
+    def add(key: str) -> bool:
+        try:
+            store().put(checksum_key(key), checksum_doc(key, store().get(key)))
+        except ObjectExists:
+            return False  # another build wrote it first; the bytes are the same
+        return True
+
+    return sum(pool.map(add, missing))
