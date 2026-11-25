@@ -131,6 +131,8 @@ class PointInTime:
         self.universe = universe
         self.purpose = purpose
         self.cache_dir = cache_dir
+        # Every object read. Objects never change, so this list fingerprints the inputs.
+        self.read_keys: set[str] = set()
         self.segments = load_segments(repo_root, universe)
 
     def touched(self, start: datetime | None, end: datetime) -> list[str]:
@@ -183,7 +185,14 @@ class PointInTime:
             cached.write_bytes(self.store.get(key))
         return cached.read_bytes()
 
-    def table(self, dataset: str, *, end: datetime, start: datetime | None = None) -> pl.DataFrame:
+    def table(
+        self,
+        dataset: str,
+        *,
+        end: datetime,
+        start: datetime | None = None,
+        columns: list[str] | None = None,
+    ) -> pl.DataFrame:
         """Rows whose knowable_time lies in [start, end]. Never anything after `end`."""
         self.authorize(dataset, start, end)
         prefix = f"{DATASET_PREFIX}{dataset}/{VERSION}/"
@@ -196,7 +205,11 @@ class PointInTime:
             match = _PART.search(key)
             wanted = match is not None and first <= match["month"] <= last
             if wanted and key.removesuffix(".parquet") in committed:
-                frames.append(pl.read_parquet(io.BytesIO(self._get(key))))
+                wanted_columns = (
+                    None if columns is None else list(dict.fromkeys([*columns, "knowable_time"]))
+                )
+                frames.append(pl.read_parquet(io.BytesIO(self._get(key)), columns=wanted_columns))
+                self.read_keys.add(key)
         if not frames:
             return pl.DataFrame()
         rows = pl.concat(frames).filter(pl.col("knowable_time") <= end)

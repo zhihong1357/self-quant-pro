@@ -1,5 +1,5 @@
 """Command line: `sqp check`, `sqp power`, `sqp ledger append`, `sqp inherit scan|verify`,
-`sqp storage check`, `sqp data sync|build`."""
+`sqp storage check`, `sqp data sync|build|profile`."""
 
 from __future__ import annotations
 
@@ -14,7 +14,8 @@ from pathlib import Path
 
 from sqp import inherit, ledger, stats, storage
 from sqp.checks import run_all
-from sqp.data import build, vision
+from sqp.data import build, profile, vision
+from sqp.data.pit import PointInTime
 from sqp.repo import GitError, Repo
 
 
@@ -186,6 +187,23 @@ def _data_build(args: argparse.Namespace) -> int:
     return 1 if any(o.capped for o in outcomes.values()) else 0
 
 
+def _data_profile(args: argparse.Namespace) -> int:
+    root = Path(args.repo)
+    factory, _ = _store_factory(args)
+    store = factory()
+    pit = PointInTime(root, store, cache_dir=Path(args.cache) if args.cache else None)
+    try:
+        key, fingerprint, existed = profile.write_profile(pit, store, root)
+    except RuntimeError as exc:
+        print(exc)
+        return 1
+    print(f"画像：{key}")
+    print(f"指纹：{fingerprint}")
+    print(f"输入：{len(pit.read_keys)} 个分块")
+    print("和已存的画像一模一样：重算一致。" if existed else "已写入；同名的 .md 是给人看的摘要。")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="sqp", description="self-quant-pro：治理检查与研究工具")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -246,6 +264,13 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--local", help="用这个本机目录，而不是谷歌云存储桶")
     b.add_argument("--workers", type=int, default=16, help="并发数")
     b.set_defaults(func=_data_build)
+    f = data_sub.add_parser(
+        "profile", help="重算 U1 探索集的数据画像，结果只写进存储（不打印数字）"
+    )
+    f.add_argument("--repo", default=".", help="读哪个仓库的研究宇宙和存储配置")
+    f.add_argument("--local", help="用这个本机目录，而不是谷歌云存储桶")
+    f.add_argument("--cache", help="把读过的月度表缓存在这个本机目录")
+    f.set_defaults(func=_data_profile)
 
     args = parser.parse_args(argv)
     return args.func(args)

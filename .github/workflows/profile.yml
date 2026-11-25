@@ -1,0 +1,44 @@
+name: profile
+
+# 重算 U1 探索集的数据画像（决策 0021），只能手动触发。
+# 画像只写进私有存储桶；日志只打印对象名和指纹，不打印任何数字。
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: profile
+  cancel-in-progress: false
+
+jobs:
+  profile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+        with:
+          enable-cache: false
+      - name: 安装依赖
+        run: uv sync --locked
+      - name: 读取存储配置
+        id: cfg
+        run: |
+          uv run python - >> "$GITHUB_OUTPUT" <<'PY'
+          import tomllib
+          with open("config/storage.toml", "rb") as f:
+              gcp = tomllib.load(f)["gcp"]
+          print(f"provider={gcp['workload_identity_provider']}")
+          print(f"project={gcp['project_id']}")
+          PY
+      - name: 连上谷歌云（联合身份，没有密钥）
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ steps.cfg.outputs.provider }}
+          project_id: ${{ steps.cfg.outputs.project }}
+      - name: 重算画像
+        run: uv run sqp data profile
