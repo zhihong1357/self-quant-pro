@@ -3,24 +3,26 @@
 Real daily returns of the most liquid U1 perpetuals at the end of the exploration
 segment are the noise. Into them a signal of known strength is planted:
 
-    r'[i, t] = r[i, t] + k * sd[i] * s[i, t]
+    1 + r'[i, t] = (1 + r[i, t]) * (1 + k * sd[i] * s[i, t])
 
 where r[i, t] is the return of contract i from day t to day t + 1, sd[i] its sample
 standard deviation over the window, and s[i, t] standard normal, independent across
 contracts and days and of the returns, drawn from a fixed seed. s[i, t] is "known" at
 day t, so a portfolio formed at t that buys high s and sells low s earns k times a
-known amount on top of noise. The portfolio goes through the same engine that
-candidates A and B use (sqp.research.engine), which is the point: the control tests
-the code the real estimates will rely on.
+known amount, sum of w * sd * s * (1 + r), on top of noise. Planting by multiplying
+keeps every price positive even on a -99 % day (LUNA, May 2022), where adding could
+have pushed it below zero, and keeps the result exactly linear in k. The portfolio
+goes through the same engine that candidates A and B use (sqp.research.engine), which
+is the point: the control tests the code the real estimates will rely on.
 
 Four arms share the same s:
 
 - strong (k = 0.08): must be found: t >= 3, estimated k within [0.04, 0.12], and a
   positive mean in at least 3 of 4 equal sub-periods;
 - half (k = 0.04): reported only;
-- zero (k = 0): must not be found (t < 3);
+- zero (k = 0): must not be found in either direction (|t| < 3);
 - canary (k = 0.08, planted into the return of the day that just ended, r[i, t - 1]):
-  a correct engine trades at t and earns r[i, t], so it must not find it (t < 3). An
+  a correct engine trades at t and earns r[i, t], so it must not find it (|t| < 3). An
   engine that used the return that made the signal would show a large profit.
 
 The signal is planted into the daily prices the engine reads, never into the engine's
@@ -28,10 +30,17 @@ own output: planted into the engine's return table, it would move with any mista
 engine makes in pairing weights with days, and the canary could not see it (the
 first version of this study did exactly that; its own test caught it).
 
-On top of that, the engine is checked for consistency: every arm's portfolio return
-must equal the zero arm's plus k times the planted part computed here from the same
-weights. Costs are left out: they would mix a cost assumption into a test of the
-statistics. The verdict ("通过" or "不通过") is the only thing that reaches the log.
+On top of that, the engine is checked for consistency: every day's portfolio must be
+dollar-neutral with gross exposure 1, and every arm's portfolio return must equal the
+zero arm's plus k times the planted part computed here from the same weights. The
+planted part counts only the days where a signal was planted, those with a next day's
+close: a contract held into the day it stops trading (delisted), or across a missing
+00:00 bar, exits at its last price with nothing planted, and counting it anyway would
+call a correct engine inconsistent (a rehearsal and Gemini's review both caught that).
+
+Costs, funding and hourly prices are left out: they would mix assumptions into a test
+of the statistics. The engine's unit tests and the candidates' tests cover them. The
+verdict ("通过" or "不通过") is the only thing that reaches the log.
 """
 
 from __future__ import annotations
@@ -110,7 +119,7 @@ def daily_closes(bars: pl.DataFrame, times: list[datetime]) -> pl.DataFrame:
 def plant(
     closes: pl.DataFrame, s: pl.DataFrame, sd: pl.DataFrame, k: float, lag: int
 ) -> pl.DataFrame:
-    """A daily price path whose return from day t to t + 1 is r + k * sd * s[t + lag]:
+    """A daily price path whose growth from day t to t + 1 is (1 + r) (1 + k sd s[t + lag]):
     lag 0 plants the signal known at t into the return that follows it; lag 1 plants it
     into the return that ends when it becomes known (the canary). A gap in the data
     starts the path again from the real price."""
@@ -119,7 +128,7 @@ def plant(
         closes.join(sd, on="symbol")
         .join(shifted, on=["symbol", "time"], how="left")
         .with_columns(pl.col("s").fill_null(0.0))
-        .with_columns(g=1 + pl.col("ret") + k * pl.col("sd") * pl.col("s"))
+        .with_columns(g=(1 + pl.col("ret")) * (1 + k * pl.col("sd") * pl.col("s")))
         .sort("symbol", "time")
         .with_columns(
             run=pl.col("ret").is_null().shift(1, fill_value=False).cum_sum().over("symbol")
@@ -145,14 +154,16 @@ def evaluate(klines: pl.DataFrame, params: dict) -> Outcome:
         raise ValueError(f"只找到 {len(names)} 个流动性够的合约，少于 {params['min_names']}")
     times = rebalance_times(start, end, DAY)
     closes = daily_closes(klines.filter(pl.col("symbol").is_in(names)), times)
-    sd = closes.group_by("symbol").agg(pl.col("ret").std().alias("sd"))
+    # A contract with fewer than two returns in the window gets no signal (sd 0).
+    sd = closes.group_by("symbol").agg(pl.col("ret").std().fill_null(0.0).alias("sd"))
     s = planted(names, times, int(params["seed"]))
     arms = {name: (float(k), 0) for name, k in params["strengths"].items()}
     if set(arms) != {"strong", "half", "zero"}:
         raise ValueError("strengths 必须正好有 strong、half、zero 三组")
     arms["canary"] = (float(params["canary_strength"]), 1)
     # The portfolio is the same in every arm: formed from s at each day that has a next.
-    tradable = prices_at(plant(closes, s, sd, 0.0, 0), times, max_staleness=timedelta(hours=1))
+    real = closes.select("symbol", pl.col("time").alias("knowable_time"), "close")
+    tradable = prices_at(real, times, max_staleness=timedelta(hours=1))
     signal = s.filter(pl.col("time") < times[-1]).select(
         "symbol", "time", pl.col("s").alias("value"), pl.col("time").alias("knowable_time")
     )
@@ -164,18 +175,32 @@ def evaluate(klines: pl.DataFrame, params: dict) -> Outcome:
         min_names=int(params["min_names"]),
     )
     # What each portfolio earns per unit of k when the engine pairs weights and returns
-    # correctly: the sum of w * sd * s over the day it is held.
+    # correctly: the sum of w * sd * s * (1 + r) over the day it is held, counting only
+    # the contracts into whose next day a signal was planted.
+    planted_days = closes.filter(pl.col("ret").is_not_null()).select("symbol", "time", "ret")
     part = (
-        weights.join(s, on=["symbol", "time"])
+        weights.join(planted_days, on=["symbol", "time"])
+        .join(s, on=["symbol", "time"])
         .join(sd, on="symbol")
+        .sort("time", "symbol")
         .group_by("time")
-        .agg((pl.col("weight") * pl.col("sd") * pl.col("s")).sum().alias("part"))
+        .agg((pl.col("weight") * pl.col("sd") * pl.col("s") * (1 + pl.col("ret"))).sum())
+        .rename({"weight": "part"})
+    )
+    # Every day's portfolio: dollar-neutral, gross exposure 1.
+    books = weights.group_by("time").agg(
+        net=pl.col("weight").sum(), gross=pl.col("weight").abs().sum()
+    )
+    neutral = books.height > 0 and bool(
+        ((books["net"].abs() < 1e-12) & ((books["gross"] - 1).abs() < 1e-12)).all()
     )
     results, nets = {}, {}
     for name, (k, lag) in arms.items():
         prices = prices_at(plant(closes, s, sd, k, lag), times, max_staleness=timedelta(hours=1))
         periods = portfolio_returns(weights, period_returns(prices))
-        joined = periods.join(part, on="time")
+        joined = periods.join(part, on="time", how="left").with_columns(
+            pl.col("part").fill_null(0.0)
+        )
         mean_part = float(joined["part"].mean())
         estimate = float(joined["net"].mean()) / mean_part if mean_part else None
         nets[name] = periods.select("time", pl.col("net").alias(name))
@@ -193,23 +218,25 @@ def evaluate(klines: pl.DataFrame, params: dict) -> Outcome:
         gap = (
             nets[name]
             .join(nets["zero"], on="time")
-            .join(part, on="time")
+            .join(part, on="time", how="left")
+            .with_columns(pl.col("part").fill_null(0.0))
             .select((pl.col(name) - pl.col("zero") - arms[name][0] * pl.col("part")).abs().max())
             .item()
         )
         consistent = consistent and gap is not None and gap < 1e-9
-    verdict, checks = judge(results, params, consistent)
+    verdict, checks = judge(results, params, consistent, neutral)
     metrics = {
         "names": len(names),
         "days": len(times),
         "arms": results,
         "checks": checks,
         "engine_consistent": consistent,
+        "dollar_neutral_gross_one": neutral,
     }
     return Outcome(metrics=metrics, sections=sections(metrics, params, names), verdict=verdict)
 
 
-def judge(results: dict, params: dict, consistent: bool) -> tuple[str, dict]:
+def judge(results: dict, params: dict, consistent: bool, neutral: bool) -> tuple[str, dict]:
     strong, zero, canary = results["strong"], results["zero"], results["canary"]
     bar = float(params["pass_t"])
     low, high = float(params["strength_low"]), float(params["strength_high"])
@@ -218,9 +245,10 @@ def judge(results: dict, params: dict, consistent: bool) -> tuple[str, dict]:
         "strong_found": strong["t_stat"] is not None and strong["t_stat"] >= bar,
         "strong_estimate_in_range": estimate is not None and low <= estimate <= high,
         "strong_quarters": strong["positive_quarters"] >= int(params["quarters_positive"]),
-        "zero_not_found": zero["t_stat"] is None or zero["t_stat"] < bar,
-        "canary_not_found": canary["t_stat"] is None or canary["t_stat"] < bar,
+        "zero_not_found": zero["t_stat"] is None or abs(zero["t_stat"]) < bar,
+        "canary_not_found": canary["t_stat"] is None or abs(canary["t_stat"]) < bar,
         "engine_consistent": consistent,
+        "dollar_neutral_gross_one": neutral,
     }
     return ("通过" if all(checks.values()) else "不通过"), checks
 
@@ -274,10 +302,12 @@ def sections(m: dict, params: dict, names: list[str]) -> dict:
             f"{'、'.join(names)}。"
         ),
         "方法": (
-            f"植入：r' = r + k·sd·s，s 由种子 {params['seed']} 生成。"
+            f"植入：1 + r' = (1 + r)(1 + k·sd·s)，s 由种子 {params['seed']} 生成"
+            "（乘法植入，暴跌日价格也不会变成负数）。"
             f"每天按 s 分 {params['groups']} 组，做多最高组、做空最低组（美元中性），"
             "走 sqp.research.engine；不扣成本。"
-            "估出的强度 = 组合平均收益 ÷ 组合在植入部分上的平均暴露。"
+            "估出的强度 = 组合平均收益 ÷ 组合在植入部分上的平均暴露；"
+            "持有到下架或遇到缺失的 00:00 K 线的那一天没有植入，不计入植入部分。"
             "t 值按偏度和峰度修正标准误，没有做自相关修正（s 在时间上独立）。"
         ),
         "结果": (
@@ -285,7 +315,9 @@ def sections(m: dict, params: dict, names: list[str]) -> dict:
             "|---|---|---|---|---|---|\n"
             f"{rows}\n\n"
             "引擎一致性（每组 = 零组 + k × 植入部分）："
-            f"{'是' if m['engine_consistent'] else '否'}。"
+            f"{'是' if m['engine_consistent'] else '否'}；"
+            "每天美元中性、总敞口 1 倍："
+            f"{'是' if m['dollar_neutral_gross_one'] else '否'}。"
         ),
         "边际贡献": "不适用：元研究，研究对象是流程本身。",
         "成本与容量": "不适用：植入的信号以波动率为单位，没有成本模型。",
@@ -293,6 +325,8 @@ def sections(m: dict, params: dict, names: list[str]) -> dict:
         "适用范围与停止条件": (
             "只说明引擎在这类日度、横截面、美元中性的组合上能检出已知信号，"
             "并且不会把前一期的收益当成可以赚的收益；不说明任何真实信号存在。"
+            "不覆盖资金费、成本扣减和小时级 K 线的对齐：这些由引擎的单元测试"
+            "（tests/test_engine.py）和候选 A、B 的测试覆盖。"
             "判定为不通过时，先修引擎，候选 A、B 不登记。"
         ),
     }

@@ -16,6 +16,8 @@ from sqp.research.studies import SECTIONS, planted_signal
 
 ROOT = Path(__file__).resolve().parents[1]
 H = timedelta(hours=1)
+DAY = timedelta(days=1)
+T = pl.Datetime("us", "UTC")
 
 
 def synthetic_klines(first: datetime, days: int, symbols: int = 24, seed: int = 1) -> pl.DataFrame:
@@ -91,7 +93,88 @@ def test_a_signal_too_weak_to_find_fails_the_control(market):
 def test_the_result_is_deterministic(market):
     one = planted_signal.evaluate(market, small())
     two = planted_signal.evaluate(market, small())
-    assert json.dumps(one.metrics, sort_keys=True) == json.dumps(two.metrics, sort_keys=True)
+    for a, b in ((one.metrics, two.metrics), (one.sections, two.sections)):
+        assert json.dumps(a, sort_keys=True, allow_nan=False) == json.dumps(
+            b, sort_keys=True, allow_nan=False
+        )
+
+
+def held_days(market: pl.DataFrame, params: dict) -> tuple[list[str], pl.DataFrame]:
+    """The names, and the days on which each sits in the long or short fifth by s."""
+    start = planted_signal.day(params["window_start"])
+    names = planted_signal.liquid_names(market, start, 90, 20, 80)
+    times = planted_signal.rebalance_times(start, planted_signal.day(params["window_end"]), DAY)
+    s = planted_signal.planted(names, times, int(params["seed"]))
+    ranked = s.with_columns(rank=pl.col("s").rank("ordinal").over("time"))
+    return names, ranked.filter((pl.col("rank") <= 4) | (pl.col("rank") > 16))
+
+
+def test_a_delisting_and_a_missing_bar_inside_the_window_do_not_break_the_control(market):
+    """Real data has both (LUNA was delisted in May 2022, days into the window). A held
+    contract that stops trading, or misses its 00:00 bar, exits at its last price with
+    nothing planted: the planted part must not count it."""
+    params = small()
+    names, held = held_days(market, params)
+    after = planted_signal.day("2020-06-01")
+    d1 = held.filter((pl.col("symbol") == names[0]) & (pl.col("time") > after))["time"][0]
+    d2 = held.filter((pl.col("symbol") == names[1]) & (pl.col("time") > d1))["time"][0]
+    broken = market.filter(
+        ~((pl.col("symbol") == names[0]) & (pl.col("knowable_time") > d1))  # delisted
+        & ~((pl.col("symbol") == names[1]) & (pl.col("knowable_time") == d2 + DAY))
+    )
+    outcome = planted_signal.evaluate(broken, params)
+    assert outcome.metrics["checks"]["engine_consistent"] is True
+    assert outcome.verdict == "通过", outcome.metrics["checks"]
+    json.dumps(outcome.metrics, allow_nan=False)
+
+
+def test_planting_by_multiplying_keeps_prices_positive_on_a_crash_day():
+    """r = -0.99 with sd 0.25 and s = -1: adding would give growth 1 - 0.99 - 0.02 < 0."""
+    times = [datetime(2022, 5, d, tzinfo=UTC) for d in (10, 11, 12)]
+    closes = pl.DataFrame(
+        {"symbol": ["L"] * 3, "time": times, "close": [100.0, 1.0, 1.0], "ret": [-0.99, 0.0, None]}
+    ).with_columns(pl.col("time").cast(T))
+    s = pl.DataFrame({"symbol": ["L"] * 3, "time": times, "s": [-1.0, 0.0, 0.0]}).with_columns(
+        pl.col("time").cast(T)
+    )
+    sd = pl.DataFrame({"symbol": ["L"], "sd": [0.25]})
+    path = planted_signal.plant(closes, s, sd, k=0.08, lag=0)["close"].to_list()
+    assert min(path) > 0
+    assert path[1] == pytest.approx(100 * 0.01 * (1 - 0.08 * 0.25))
+
+
+def test_weights_that_are_not_dollar_neutral_with_gross_one_fail_the_control(market, monkeypatch):
+    """Doubling every weight keeps every t-value and the linearity check intact; only the
+    book check sees it (Gemini's review found the gap)."""
+    honest = planted_signal.quantile_weights
+
+    def doubled(*args, **kwargs):
+        return honest(*args, **kwargs).with_columns(pl.col("weight") * 2)
+
+    monkeypatch.setattr(planted_signal, "quantile_weights", doubled)
+    outcome = planted_signal.evaluate(market, small())
+    assert outcome.metrics["checks"]["dollar_neutral_gross_one"] is False
+    assert outcome.verdict == "不通过"
+
+
+def test_each_check_can_fail_the_control_on_its_own():
+    good = {
+        "strong": {"t_stat": 8.0, "estimated_strength": 0.08, "positive_quarters": 4},
+        "zero": {"t_stat": 0.5},
+        "canary": {"t_stat": -0.5},
+    }
+    params = registered()
+    assert planted_signal.judge(good, params, True, True)[0] == "通过"
+    assert planted_signal.judge(good, params, False, True)[0] == "不通过"
+    assert planted_signal.judge(good, params, True, False)[0] == "不通过"
+    for arm, key, value in [
+        ("strong", "estimated_strength", 0.2),
+        ("strong", "positive_quarters", 2),
+        ("zero", "t_stat", -3.5),  # found, in the wrong direction: still a bug
+        ("canary", "t_stat", -8.0),
+    ]:
+        bad = {**good, arm: {**good[arm], key: value}}
+        assert planted_signal.judge(bad, params, True, True)[0] == "不通过", (arm, key)
 
 
 def test_the_registered_parameters_work_on_their_own_window():
