@@ -399,3 +399,17 @@ def test_the_planned_windows():
     assert (b[0], b[-1]) == (utc(2020, 1, 1), utc(2024, 1, 31))
     first_liquidity = fc.day(PLANNED_A["start"]) - fc.day(PLANNED_A["read_from"])
     assert first_liquidity >= timedelta(days=PLANNED_A["liquidity_min_days"])
+
+
+def test_the_registered_cards_carry_the_reviewed_parameters():
+    """T-0004 and T-0005 must run exactly what was reviewed: PLANNED_A and PLANNED_B."""
+    from pathlib import Path
+
+    from sqp.research import trials
+
+    text = (Path(__file__).resolve().parents[1] / trials.TRIALS).read_text("utf-8")
+    cards = {t.hypothesis: t for t in trials.parse(text) if t.study == "first_candidates"}
+    assert set(cards) == {"H-0002", "H-0003"}
+    assert dict(cards["H-0002"].params) == PLANNED_A
+    assert dict(cards["H-0003"].params) == PLANNED_B
+    assert all(t.segment == "exploration" and not t.repeat_of for t in cards.values())
