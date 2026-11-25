@@ -26,13 +26,13 @@ G0 只有治理层。其余各层按[路线图](roadmap.md)逐个阶段加入，
 |---|---|
 | `AGENTS.md`、`CLAUDE.md` | 智能体规则 |
 | `STAGE` | 当前阶段 |
-| `config/` | 治理、科研规程、继承规则的配置（冻结） |
+| `config/` | 治理、科研规程、继承规则、谷歌云存储的配置（冻结） |
 | `docs/` | 宪章、规程、架构、路线图、决策记录等 |
 | `registry/` | 继承记录、研究宇宙、假说卡、三本账 |
-| `src/sqp/` | 治理检查与研究工具 |
+| `src/sqp/` | 治理检查与研究工具；`storage.py` 是只增不改的存储层（本机目录或谷歌云存储桶） |
 | `scripts/gcp/` | 所有者在 Cloud Shell 里运行的一次性设置脚本（[开通谷歌云](gcp-setup.md)） |
 | `tests/` | 测试，含 G0 验收测试 `test_acceptance.py` |
-| `.github/` | 持续集成、PR 模板 |
+| `.github/` | 持续集成、PR 模板、手动触发的环境自检 `env-check.yml` |
 
 计划：`src/sqp/data/`（G1）、`src/sqp/research/`（G2）、`src/sqp/model/` 与 `src/sqp/capacity/`（G4）、`deploy/`（G5）、`src/sqp/execution/`（G7）。
 
@@ -70,7 +70,7 @@ G0 只有治理层。其余各层按[路线图](roadmap.md)逐个阶段加入，
 | 需要 | 服务 | 要点 |
 |---|---|---|
 | 定时运行 | Cloud Scheduler 触发 Cloud Run 作业 | 跑完即停，不常驻 |
-| 存储 | Cloud Storage | G1 起；存储桶在 us-central1（免费额度区域）；数据工作流的身份只能新建和读取对象，不能删除和覆盖，存储层面只增不改（决策 0015） |
+| 存储 | Cloud Storage | G1 起；存储桶在 us-central1（免费额度区域）；数据工作流的身份只能新建和读取对象，不能删除和覆盖，存储层面只增不改（决策 0015）；项目、存储桶、身份提供方写在 `config/storage.toml`，都不是密钥（决策 0017） |
 | 分析 | BigQuery | 按扫描量计费，每个查询设扫描上限 |
 | 密钥 | Secret Manager | 代码只引用名字，不碰明文 |
 | 镜像 | Artifact Registry | 设清理策略，只留最近几个版本 |
