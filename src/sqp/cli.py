@@ -1,5 +1,5 @@
 """Command line: `sqp check`, `sqp power`, `sqp ledger append`, `sqp inherit scan|verify`,
-`sqp storage check`, `sqp data sync|build|profile`."""
+`sqp storage check`, `sqp data sync|build|profile`, `sqp trial run`."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import json
 import secrets
 import sys
 import tomllib
+import traceback
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -17,6 +18,7 @@ from sqp.checks import run_all
 from sqp.data import build, gen1, profile, vision
 from sqp.data.pit import PointInTime
 from sqp.repo import GitError, Repo
+from sqp.research import run
 
 
 def _check(args: argparse.Namespace) -> int:
@@ -208,6 +210,40 @@ def _data_build(args: argparse.Namespace) -> int:
     return 1 if any(o.capped for o in outcomes.values()) else 0
 
 
+def _trial_run(args: argparse.Namespace) -> int:
+    root = Path(args.repo)
+    factory, _ = _store_factory(args)
+    store = factory()
+    try:
+        wanted = [args.trial] if args.trial else run.pending(root, store)
+    except run.TrialRefused as exc:
+        print(f"拒绝：{exc}")
+        return 1
+    if not wanted:
+        print("没有等着跑的试验卡。")
+        return 0
+    failed = 0
+    for tid in wanted:
+        try:
+            done = run.run_trial(root, store, tid)
+        except run.TrialRefused as exc:
+            print(f"{tid} 拒绝：{exc}")
+            failed += 1
+            continue
+        except Exception as exc:  # only the type: a message may carry numbers (decision 0011)
+            print(f"{tid} 出错：{type(exc).__name__}。这次已开始，计入试验次数（决策 0025）")
+            for frame in traceback.extract_tb(exc.__traceback__):  # where, never the values
+                print(f"  {frame.filename}:{frame.lineno} {frame.name}")
+            failed += 1
+            continue
+        for line in done.lines:
+            print(line)
+        for alarm in done.alarms:
+            print(f"报警：{alarm}")
+        failed += bool(done.alarms)
+    return 1 if failed else 0
+
+
 def _data_profile(args: argparse.Namespace) -> int:
     root = Path(args.repo)
     factory, _ = _store_factory(args)
@@ -297,6 +333,14 @@ def main(argv: list[str] | None = None) -> int:
     f.add_argument("--local", help="用这个本机目录，而不是谷歌云存储桶")
     f.add_argument("--cache", help="把读过的月度表缓存在这个本机目录")
     f.set_defaults(func=_data_profile)
+
+    p = sub.add_parser("trial", help="试验（决策 0025）：先在 main 上登记，再跑")
+    trial_sub = p.add_subparsers(dest="trial_command", required=True)
+    r = trial_sub.add_parser("run", help="跑一张已登记的试验卡；不写编号就跑所有还没跑过的")
+    r.add_argument("trial", nargs="?", default="", help="试验编号，例如 T-0001")
+    r.add_argument("--repo", default=".", help="读哪个仓库的试验账本和存储配置")
+    r.add_argument("--local", help="用这个本机目录，而不是谷歌云存储桶")
+    r.set_defaults(func=_trial_run)
 
     args = parser.parse_args(argv)
     return args.func(args)

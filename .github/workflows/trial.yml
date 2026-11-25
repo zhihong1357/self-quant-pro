@@ -1,0 +1,55 @@
+name: trial
+
+# 跑已经登记在 main 上的试验卡（决策 0025）。
+# 每张卡只能跑一次：存储桶里先写一个不能覆盖的"已开始"标记，再读数据。
+# 结果和报告只写进私有存储桶；日志只打印对象名和指纹，不打印任何数字。
+# 手动触发时可以写一个试验编号；不写就跑所有还没跑过的卡。每天也自动跑一次。
+
+on:
+  schedule:
+    - cron: "23 1 * * *"
+  workflow_dispatch:
+    inputs:
+      trial:
+        description: "试验编号，例如 T-0001（留空就跑所有还没跑过的）"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: trial
+  cancel-in-progress: false
+
+jobs:
+  trial:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+        with:
+          enable-cache: false
+      - name: 安装依赖
+        run: uv sync --locked
+      - name: 读取存储配置
+        id: cfg
+        run: |
+          uv run python - >> "$GITHUB_OUTPUT" <<'PY'
+          import tomllib
+          with open("config/storage.toml", "rb") as f:
+              gcp = tomllib.load(f)["gcp"]
+          print(f"provider={gcp['workload_identity_provider']}")
+          print(f"project={gcp['project_id']}")
+          PY
+      - name: 连上谷歌云（联合身份，没有密钥）
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ steps.cfg.outputs.provider }}
+          project_id: ${{ steps.cfg.outputs.project }}
+      - name: 跑试验
+        env:
+          TRIAL: ${{ inputs.trial }}
+        run: uv run sqp trial run -- "$TRIAL"

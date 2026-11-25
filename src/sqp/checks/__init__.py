@@ -20,7 +20,7 @@ class Violation:
 
 
 def run_all(repo: Repo) -> list[Violation]:
-    from sqp.checks import code, decisions, files, history, registry, research, secrets
+    from sqp.checks import code, decisions, files, history, registry, research, secrets, trials
     from sqp.config import GOVERNANCE_PATH, load_governance
 
     text = repo.text(GOVERNANCE_PATH)
@@ -29,6 +29,6 @@ def run_all(repo: Repo) -> list[Violation]:
     cfg = load_governance(text)
     paths = repo.files()
     found: set[Violation] = set()
-    for module in (files, secrets, code, research, registry, decisions, history):
+    for module in (files, secrets, code, research, registry, trials, decisions, history):
         found.update(module.check(repo, cfg, paths))
     return sorted(found)
