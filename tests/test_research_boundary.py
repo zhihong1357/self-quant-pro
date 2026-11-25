@@ -13,8 +13,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import polars as pl
+import polars.selectors as cs
+from typing import Any, cast
 
-from sqp import stats
 from sqp.data.pit import AccessRefused, PointInTime
 from sqp.stats import expected_max_sharpe
 
@@ -24,7 +25,8 @@ from .common import helper
 
 def run(pit: PointInTime) -> dict:
     df = pit.table("um-klines-1h", end=datetime(2024, 1, 1, tzinfo=UTC))
-    return {"n": df.height, "x": math.sqrt(2), "e": expected_max_sharpe(9, 1.75)}
+    picked = df.select(cs.numeric()).with_columns(pl.col("close").rolling_mean(3))
+    return cast(Any, {"n": picked.height, "x": math.sqrt(2), "e": expected_max_sharpe(9, 1.75)})
 """
 
 
@@ -109,3 +111,49 @@ def test_code_outside_the_studies_directory_is_not_restricted(sandbox):
     assert (
         violations(sandbox, "from sqp.storage import GcsStore\n", "src/sqp/research/run.py") == []
     )
+
+
+# --- found by the independent review of PR #16 -------------------------------
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from typing import operator\ndef f(pit):\n    return operator.attrgetter('x')(pit)\n",
+        "from dataclasses import builtins\n",
+        "from dataclasses import inspect\n",
+        "from dataclasses import sys\n",
+        "import dataclasses\ndef f(pit):\n    return dataclasses.inspect.getmembers(pit)\n",
+        "import typing\nx = typing.types\n",
+        "import enum\nx = enum.bltns\n",
+        "import polars as pl\npl.os.system('true')\n",
+        "import polars as pl\nx = pl.config\n",
+        "import polars as pl\nx = pl.contextlib\n",
+        "import polars.io\n",
+        "from polars import dependencies\n",
+        "from math import nothere\n",
+        "from sqp.stats import NormalDist\n",
+        "from sqp.stats import math\n",
+        "from sqp import stats\n",
+        "def f(x, pit):\n    return x.getattr(pit, 'p')\n",
+        "def f(x):\n    return x.open('/etc/passwd')\n",
+    ],
+)
+def test_reexported_modules_and_attribute_forms_are_refused(sandbox, source):
+    assert violations(sandbox, source)
+
+
+@pytest.mark.parametrize(
+    ("path", "source", "refused"),
+    [
+        ("src/sqp/research/studies/h0001__init__.py", "from .. import run\n", True),
+        ("src/sqp/research/studies/h0001.py", "from ...... import x\n", True),
+        ("src/sqp/research/studies/__init__.py", "from .. import run\n", True),
+        ("src/sqp/research/studies/__init__.py", "from . import helpers\n", False),
+        ("src/sqp/research/studies/sub/mod.py", "from .. import helpers\n", False),
+        ("src/sqp/research/studies/sub/mod.py", "from ... import run\n", True),
+        ("src/sqp/research/studies/sub/mod.py", "from ...studies import helpers\n", False),
+    ],
+)
+def test_relative_imports_resolve_like_python(sandbox, path, source, refused):
+    assert bool(violations(sandbox, source, path)) is refused

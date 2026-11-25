@@ -285,32 +285,40 @@ class PointInTime:
         name = checksum_key(key)
         if name not in keys:
             raise IntegrityError(f"分块没有校验值：{key}。先运行一次 sqp data build 补写")
-        doc = json.loads(self._store.get(name))
-        if doc.get("key") != key or not isinstance(doc.get("sha256"), str):
+        try:
+            doc = json.loads(self._store.get(name))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            doc = None
+        if (
+            not isinstance(doc, dict)
+            or doc.get("key") != key
+            or not isinstance(doc.get("sha256"), str)
+        ):
             raise IntegrityError(f"校验值文件和分块对不上：{name}")
         return doc["sha256"]
 
     def _get(self, key: str, expected: str) -> bytes:
         cached = None if self._cache_dir is None else self._cache_dir / key
-        if cached is not None and cached.is_file():
-            data = cached.read_bytes()
-            if hashlib.sha256(data).hexdigest() != expected:
-                raise IntegrityError(f"本机缓存的分块和校验值对不上：{cached}。删掉它再重跑")
-        else:
-            data = self._store.get(key)
-            if hashlib.sha256(data).hexdigest() != expected:
-                raise IntegrityError(f"存储里的分块和校验值对不上：{key}")
-            if cached is not None:
-                cached.parent.mkdir(parents=True, exist_ok=True)
-                fd, tmp = tempfile.mkstemp(dir=cached.parent, prefix=".tmp-")
-                try:
-                    with os.fdopen(fd, "wb") as f:
-                        f.write(data)
-                    os.replace(tmp, cached)  # atomic: no half-written file under the real name
-                except BaseException:
-                    Path(tmp).unlink(missing_ok=True)
-                    raise
+        from_cache = cached is not None and cached.is_file()
+        data = cached.read_bytes() if from_cache else self._store.get(key)
         digest = hashlib.sha256(data).hexdigest()
+        if digest != expected:
+            where = (
+                f"本机缓存的分块和校验值对不上：{cached}。删掉它再重跑"
+                if from_cache
+                else (f"存储里的分块和校验值对不上：{key}")
+            )
+            raise IntegrityError(where)
+        if cached is not None and not from_cache:
+            cached.parent.mkdir(parents=True, exist_ok=True)
+            fd, tmp = tempfile.mkstemp(dir=cached.parent, prefix=".tmp-")
+            try:
+                with os.fdopen(fd, "wb") as f:
+                    f.write(data)
+                os.replace(tmp, cached)  # atomic: no half-written file under the real name
+            except BaseException:
+                Path(tmp).unlink(missing_ok=True)
+                raise
         if self._inputs.setdefault(key, digest) != digest:
             raise IntegrityError(f"同一个分块两次读到的内容不一样：{key}")
         return data
