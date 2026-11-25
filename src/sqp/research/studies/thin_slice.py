@@ -134,7 +134,12 @@ def run(pit: None, params: dict) -> Outcome:
             "gen2_abs_diff": round(abs(r_pit - previous), 15),
             "gen2_gap_in_standard_errors": round(abs(r_pit - previous) / standard_error, 6),
         }
-    return Outcome(metrics=metrics, sections=sections(metrics, params, min(public), max(public)))
+    verdict = None
+    if "gen2_corr_pit" in params:
+        exact = metrics["gen2_pairs"] == n and metrics["gen2_abs_diff"] < 1e-9
+        verdict = "一致" if exact else "不一致"
+    text = sections(metrics, params, min(public), max(public))
+    return Outcome(metrics=metrics, sections=text, verdict=verdict)
 
 
 def f3(v: float) -> str:

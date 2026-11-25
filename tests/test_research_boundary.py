@@ -210,3 +210,12 @@ def test_the_study_conventions_are_importable(sandbox):
     source = "from sqp.research.studies import SECTIONS, Outcome\nfrom . import Outcome as O\n"
     assert violations(sandbox, source) == []
     assert violations(sandbox, "from sqp.research.studies import dataclass\n")
+
+
+def test_studies_may_use_the_engine_but_only_its_own_functions(sandbox):
+    assert (
+        violations(sandbox, "from sqp.research.engine import quantile_weights, summarize\n") == []
+    )
+    assert violations(sandbox, "from sqp.research.engine import pl\n")  # a re-export
+    assert violations(sandbox, "from sqp.research.engine import sharpe_standard_error\n")
+    assert violations(sandbox, "from sqp.research import engine\n")

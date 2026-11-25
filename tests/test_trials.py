@@ -210,6 +210,8 @@ def run(pit, params):
         rows = pit.table("um-klines-1h", end=end).height
     if mode == "short":
         full.pop("稳健性")
+    if mode == "verdict":
+        return Outcome(metrics={"rows": rows}, sections=full, verdict=params["word"])
     return Outcome(metrics={"rows": rows}, sections=full)
 """
 
@@ -510,3 +512,36 @@ def test_a_repeat_waits_until_its_original_has_finished(repo, lake, studies):
     with pytest.raises(ValueError):
         run.run_trial(repo, lake, "T-0001", package=studies)
     assert run.pending(repo, lake) == []  # T-0002 can never run; it must not fail every day
+
+
+# --- verdicts and test counts (decision 0026) ---------------------------------
+
+
+def test_a_verdict_from_the_list_is_printed(repo, lake, studies):
+    register(repo, trial(params={"mode": "verdict", "word": "通过"}))
+    done = run.run_trial(repo, lake, "T-0001", package=studies)
+    assert "判定：通过" in done.lines
+    assert json.loads(lake.get(run.completed_key("T-0001")))["verdict"] == "通过"
+
+
+def test_any_other_verdict_is_an_error_and_never_echoed(repo, lake, studies):
+    register(repo, trial(params={"mode": "verdict", "word": "夏普 3.14"}))
+    with pytest.raises(ValueError) as error:
+        run.run_trial(repo, lake, "T-0001", package=studies)
+    assert "3.14" not in str(error.value)
+
+
+def test_a_card_with_several_tests_counts_several_times():
+    def read(path: str) -> str | None:
+        return {
+            "registry/hypotheses/H-0001.toml": card_text("H-0001", universe="U1"),
+            "registry/universes/U1.toml": 'domain = "crypto"\n',
+            trials.INHERITED: json.dumps({"summary": {"counted_by_domain": {"crypto": 9}}}),
+        }.get(path)
+
+    assert trials.counted(ledger_text(trial(tests=4), trial()), read, "U1") == 9 + 5
+
+
+@pytest.mark.parametrize("value", [0, -1, 1.5, True, "2"])
+def test_tests_must_be_a_whole_number_of_at_least_one(cards, value):
+    assert any("tests" in m for m in card_problems(cards, trial(tests=value)))
