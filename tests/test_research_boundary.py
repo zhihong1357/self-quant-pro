@@ -85,6 +85,7 @@ def test_reaching_around_the_interface_is_refused(sandbox, line):
         "pl.sql('SELECT * FROM read_parquet(\\'x\\')')",
         "pl.SQLContext().execute('x')",
         "pl.Config.load_from_file('x')",
+        "pl.Config.set_verbose(True)",  # prints from Rust, past the console capture
         "(x for x in ()).gi_frame.f_globals['open']",
         "e.tb_frame.f_back",
         "get_type_hints(f)",

@@ -212,6 +212,19 @@ def run(pit, params):
         full.pop("稳健性")
     if mode == "verdict":
         return Outcome(metrics={"rows": rows}, sections=full, verdict=params["word"])
+    if mode == "sneaky":
+        class Sneaky(str):  # passes a membership test, prints something else
+            def __eq__(self, other):
+                return other == "通过"
+
+            __hash__ = str.__hash__
+
+            def __str__(self):
+                return "SHARPE=3.14"
+
+        return Outcome(metrics={}, sections=full, verdict=Sneaky("通过"))
+    if mode == "named":
+        raise type("S3_14", (ValueError,), {"__module__": "builtins"})("x")
     return Outcome(metrics={"rows": rows}, sections=full)
 """
 
@@ -529,6 +542,27 @@ def test_any_other_verdict_is_an_error_and_never_echoed(repo, lake, studies):
     with pytest.raises(ValueError) as error:
         run.run_trial(repo, lake, "T-0001", package=studies)
     assert "3.14" not in str(error.value)
+
+
+def test_a_verdict_that_only_looks_like_one_from_the_list_is_an_error(repo, lake, studies):
+    register(repo, trial(params={"mode": "sneaky"}))
+    with pytest.raises(ValueError) as error:
+        run.run_trial(repo, lake, "T-0001", package=studies)
+    assert "3.14" not in str(error.value)
+
+
+def test_an_error_type_made_by_the_study_is_not_named_in_the_log(
+    repo, lake, studies, capsys, monkeypatch
+):
+    import functools
+
+    from sqp import cli
+
+    register(repo, trial(params={"mode": "named"}))
+    monkeypatch.setattr(run, "run_trial", functools.partial(run.run_trial, package=studies))
+    code = cli.main(["trial", "run", "--repo", str(repo), "--local", str(lake.root)])
+    out = capsys.readouterr().out
+    assert code == 1 and "S3_14" not in out and "名字不打印" in out
 
 
 def test_a_card_with_several_tests_counts_several_times():

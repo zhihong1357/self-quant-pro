@@ -103,6 +103,7 @@ OTHER_NAMES = frozenset(
     {
         "sql",
         "sql_expr",
+        "Config",  # polars' verbose mode prints from Rust, past the console capture
         "SQLContext",
         "plugins",
         "register_plugin_function",
