@@ -46,7 +46,11 @@ class FakeBucket:
         return FakeBlob(self, name)
 
     def list_blobs(self, prefix: str = "") -> list[SimpleNamespace]:
-        return [SimpleNamespace(name=n) for n in self.objects if n.startswith(prefix)]
+        return [
+            SimpleNamespace(name=n, size=len(d))
+            for n, d in self.objects.items()
+            if n.startswith(prefix)
+        ]
 
 
 class FakeBlob:

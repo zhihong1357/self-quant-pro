@@ -13,7 +13,7 @@
 
 | 数据源 | 研究 | 公开派生结果 | 实盘 | 核对 |
 |---|---|---|---|---|
-| Binance Vision（data.binance.vision） | 允许：纯个人、非生产用途的历史回测 | 只能以 CC BY-NC-SA 4.0 发布并注明来源；本仓库不放 | 不允许：不得用于实盘自营交易；由它得出的模型受同样约束 | 2026-11-24，Vision Dataset Terms 1.0（2026-08-26 更新） |
+| Binance Vision（data.binance.vision，登记在 `registry/sources/binance-vision.toml`） | 允许：纯个人、非生产用途的历史回测 | 只能以 CC BY-NC-SA 4.0 发布并注明来源；本仓库不放 | 不允许：不得用于实盘自营交易；由它得出的模型受同样约束 | 2026-11-24，Vision Dataset Terms 1.0（2026-08-26 更新） |
 | Deribit | 个人使用 | 未经许可不得发布 | 待核对 | 第二代 2026-11-13 读过，未重新核对 |
 | Cboe 网站 | 个人非商业使用 | 需要事先书面同意 | 待核对 | 同上 |
 

@@ -31,12 +31,19 @@ class Store(Protocol):
     def get(self, key: str) -> bytes: ...
     def exists(self, key: str) -> bool: ...
     def keys(self, prefix: str = "") -> list[str]: ...
+    def sizes(self, prefix: str = "") -> dict[str, int]: ...
 
 
 def load_config(repo_root: Path) -> dict[str, str]:
     """The [gcp] table of config/storage.toml."""
     with (repo_root / CONFIG_PATH).open("rb") as f:
         return tomllib.load(f)["gcp"]
+
+
+def max_bucket_bytes(repo_root: Path) -> int:
+    """Downloads stop before the bucket would pass this size (decision 0018)."""
+    with (repo_root / CONFIG_PATH).open("rb") as f:
+        return int(tomllib.load(f)["limits"]["max_bucket_bytes"])
 
 
 def _check_key(key: str) -> None:
@@ -78,14 +85,17 @@ class LocalStore:
         return self._path(key).is_file()
 
     def keys(self, prefix: str = "") -> list[str]:
+        return sorted(self.sizes(prefix))
+
+    def sizes(self, prefix: str = "") -> dict[str, int]:
         if not self.root.is_dir():
-            return []
-        found = (
-            p.relative_to(self.root).as_posix()
+            return {}
+        found = {
+            p.relative_to(self.root).as_posix(): p.stat().st_size
             for p in self.root.rglob("*")
             if p.is_file() and not p.name.startswith(_TMP_PREFIX)
-        )
-        return sorted(k for k in found if k.startswith(prefix))
+        }
+        return {k: v for k, v in found.items() if k.startswith(prefix)}
 
 
 class GcsStore:
@@ -124,7 +134,10 @@ class GcsStore:
         return self._bucket.blob(key).exists()
 
     def keys(self, prefix: str = "") -> list[str]:
-        return sorted(blob.name for blob in self._bucket.list_blobs(prefix=prefix))
+        return sorted(self.sizes(prefix))
+
+    def sizes(self, prefix: str = "") -> dict[str, int]:
+        return {blob.name: int(blob.size) for blob in self._bucket.list_blobs(prefix=prefix)}
 
     def iam_denies_overwrite(self, key: str) -> bool:
         """Try a plain overwrite, which IAM should refuse. Only for check markers."""

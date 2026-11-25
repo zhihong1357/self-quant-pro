@@ -1,0 +1,63 @@
+name: data-sync
+
+# 把 Binance 公开数据站的月度归档原样存进私有存储桶（决策 0018）。
+# 只搬字节、不解析内容；存储桶只增不改；日志只打印计数。
+# 月度文件在每月第一个周一发布，所以每周二跑一次；也可以在 Actions 页面手动触发。
+
+on:
+  schedule:
+    - cron: "17 3 * * 2"
+  workflow_dispatch:
+    inputs:
+      symbols:
+        description: "只同步这些永续合约（逗号分隔，留空就是全部）"
+        required: false
+        default: ""
+      dry_run:
+        description: "只列出计划，不下载"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: data-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+        with:
+          enable-cache: false
+      - name: 安装依赖
+        run: uv sync --locked
+      - name: 读取存储配置
+        id: cfg
+        run: |
+          uv run python - >> "$GITHUB_OUTPUT" <<'PY'
+          import tomllib
+          with open("config/storage.toml", "rb") as f:
+              gcp = tomllib.load(f)["gcp"]
+          print(f"provider={gcp['workload_identity_provider']}")
+          print(f"project={gcp['project_id']}")
+          PY
+      - name: 连上谷歌云（联合身份，没有密钥）
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ steps.cfg.outputs.provider }}
+          project_id: ${{ steps.cfg.outputs.project }}
+      - name: 同步
+        env:
+          SYMBOLS: ${{ inputs.symbols }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          args=()
+          if [ -n "$SYMBOLS" ]; then args+=(--symbols "$SYMBOLS"); fi
+          if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
+          uv run sqp data sync "${args[@]}"
