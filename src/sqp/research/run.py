@@ -134,8 +134,12 @@ def _outcome(result: object) -> tuple[dict, dict, str | None]:
     missing = [s for s in SECTIONS if not str(sections.get(s, "")).strip()]
     if missing:
         raise ValueError(f"标准报告缺少章节：{'、'.join(missing)}（不适用就写明“不适用”和原因）")
-    if verdict is not None and verdict not in VERDICTS:
-        raise ValueError(f"判定只能是 {'、'.join(VERDICTS)} 之一")  # never echo it: logs are public
+    if verdict is not None:
+        # Exactly a str, then replaced by our own copy: a str subclass could pass the
+        # membership test with its own __eq__ and print anything (logs are public).
+        if type(verdict) is not str or verdict not in VERDICTS:
+            raise ValueError(f"判定只能是 {'、'.join(VERDICTS)} 之一")  # never echo it
+        verdict = VERDICTS[VERDICTS.index(verdict)]
     return metrics, sections, verdict
 
 

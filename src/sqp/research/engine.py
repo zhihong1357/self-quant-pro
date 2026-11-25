@@ -16,10 +16,17 @@ The time rule every function keeps:
 
 Weights are dollar-neutral with gross exposure 1: +1/2 spread over the long group,
 -1/2 over the short group. Costs are charged on turnover at each rebalance, as a
-one-way rate per unit of notional traded; the very last close-out is not charged.
+one-way rate per unit of notional traded, including the close-out at a time with too
+few names for a new portfolio; only the very last close-out, where the sample ends,
+is not charged.
 
-Results are rounded to 10 significant digits: polars may add floats in any order,
-and the last bits must not change a result's fingerprint.
+Inputs are checked rather than trusted: a key that appears twice, a signal without a
+knowable time and a portfolio that cannot be dollar-neutral are errors; missing, NaN
+and infinite values are no signal and no price. Nothing is silently counted twice.
+
+Results are rounded to 10 significant digits, and anything smaller than 1e-12 is 0:
+polars may add floats in any order, and the last bits (a sum that should be 0 coming
+out as 1e-17) must not change a result's fingerprint.
 """
 
 from __future__ import annotations
@@ -34,13 +41,23 @@ from sqp.stats import sharpe_standard_error
 
 TIME = pl.Datetime("us", "UTC")
 DIGITS = 10
+TINY = 1e-12
 
 
 def rounded(x: float | None) -> float | None:
-    """`x` to 10 significant digits, so a result does not depend on summation order."""
+    """`x` to 10 significant digits, so a result does not depend on summation order; a
+    value smaller than 1e-12 is 0 (a sum that should be 0 can come out as 1e-17)."""
     if x is None or math.isnan(x) or math.isinf(x):
         return None
+    if abs(x) < TINY:
+        return 0.0
     return float(f"{x:.{DIGITS}g}")
+
+
+def _unique(table: pl.DataFrame, name: str, keys: tuple[str, ...] = ("symbol", "time")) -> None:
+    """A key that appears twice would be counted twice by every join after it."""
+    if table.height and table.select(keys).is_duplicated().any():
+        raise ValueError(f"{name}里有重复的（{'，'.join(keys)}）")
 
 
 def rebalance_times(start: datetime, end: datetime, every: timedelta) -> list[datetime]:
@@ -66,12 +83,15 @@ def prices_at(
     """symbol, time, price, fresh: the close of the latest bar knowable at each time.
 
     `klines` needs symbol, close and knowable_time. A symbol has rows from its first
-    bar on; `fresh` says whether that bar is at most `max_staleness` old at `time`.
+    bar on; `fresh` says whether that bar is at most `max_staleness` old at `time`. A
+    bar without a positive, finite close is ignored. If two bars of a symbol become
+    knowable at the same time, the larger close is used, the same way on every run.
     """
     bars = (
         klines.select("symbol", "close", pl.col("knowable_time").cast(TIME))
         .drop_nulls()
-        .sort("knowable_time")
+        .filter(pl.col("close").is_finite() & (pl.col("close") > 0))
+        .sort("knowable_time", "symbol", "close")  # every column: duplicates resolve alike
     )
     grid = _times(times).join(bars.select("symbol").unique(), how="cross").sort("time")
     # Both sides are sorted by time as a whole, hence within every symbol too; polars
@@ -105,7 +125,7 @@ def period_returns(prices: pl.DataFrame) -> pl.DataFrame:
         entry.join(following, on="time")
         .join(exit_, on=["symbol", "next_time"], how="left")
         .with_columns(ret=pl.col("exit") / pl.col("entry") - 1)
-        .drop_nulls("ret")
+        .filter(pl.col("ret").is_finite())
         .select("symbol", "time", "next_time", "ret")
         .sort("symbol", "time")
     )
@@ -123,21 +143,30 @@ def quantile_weights(
     lowest group (`long="low"`) or the highest (`long="high"`), short the other end.
 
     `signal` needs symbol, time, value and knowable_time; a value not yet knowable at
-    its time is an error, not something to filter away. `tradable` is the output of
-    prices_at (only fresh rows count). Times with fewer than `min_names` symbols get no
-    portfolio. Ties are broken by symbol name, so the result is deterministic.
+    its time, or without a knowable time, is an error, not something to filter away. A
+    missing, NaN or infinite value is no signal. `tradable` is the output of prices_at
+    (only fresh rows count). Times with fewer than `min_names` symbols get no portfolio;
+    `min_names` must be at least `groups`, or a group could be empty and the portfolio
+    one-sided. Ties are broken by symbol name, so the result is deterministic.
     """
     if long not in ("low", "high"):
         raise ValueError('long 只能是 "low" 或 "high"')
     if groups < 2:
         raise ValueError("groups 至少是 2")
+    if min_names < groups:
+        raise ValueError("min_names 不能小于 groups：否则有的组是空的，组合不再美元中性")
+    _unique(signal, "信号")
+    _unique(tradable, "可交易表")
+    unknown = signal.filter(pl.col("knowable_time").is_null()).height
+    if unknown:
+        raise ValueError(f"信号缺少可知时间：{unknown} 行（无法排除前视）")
     ahead = signal.filter(pl.col("knowable_time").cast(TIME) > pl.col("time").cast(TIME))
     if ahead.height:
         raise ValueError(f"信号在调仓时刻之后才可知：{ahead.height} 行（前视）")
     fresh = tradable.filter("fresh").select("symbol", "time")
     ranked = (
         signal.select("symbol", pl.col("time").cast(TIME), "value")
-        .drop_nulls("value")
+        .filter(pl.col("value").is_finite())  # drops missing values, NaN and infinities
         .join(fresh, on=["symbol", "time"])
         .sort("time", "value", "symbol")
         .with_columns(
@@ -174,8 +203,20 @@ def portfolio_returns(
     long position earns over the period on top of the price, e.g. minus the funding it
     pays; symbol, time, carry). cost: turnover x one-way cost rate, either a number or
     a table (symbol, time, cost_rate). Turnover is measured against the previous
-    weights drifted by their returns.
+    weights drifted by their returns; funding is cash, so it changes the account's
+    value but not the positions.
+
+    Trades happen at every rebalance time that has a next one (a time in `returns`).
+    Where too few names left no new portfolio, the old one is only closed, and that
+    cost belongs to the period that ends there. The last time ends the sample:
+    positions are marked there, not closed.
     """
+    _unique(weights, "权重表")
+    _unique(returns, "收益表")
+    if carry is not None:
+        _unique(carry, "资金费表")
+    if isinstance(cost_rate, pl.DataFrame):
+        _unique(cost_rate, "成本表")
     held = weights.join(returns, on=["symbol", "time"], how="left")
     missing = held.filter(pl.col("ret").is_null())
     if missing.height:
@@ -188,7 +229,8 @@ def portfolio_returns(
         held = held.with_columns(carry=pl.lit(0.0))
     held = held.with_columns(pl.col("carry").fill_null(0.0))
     per_time = (
-        held.group_by("time")
+        held.sort("time", "symbol")  # a fixed order inside every sum
+        .group_by("time")
         .agg(
             gross=(pl.col("weight") * pl.col("ret")).sum(),
             carry=(pl.col("weight") * pl.col("carry")).sum(),
@@ -200,17 +242,21 @@ def portfolio_returns(
     )
     # Weights just before each rebalance: last period's weights drifted by their returns.
     drifted = (
-        held.join(per_time.select("time", "gross"), on="time")
-        # Positions drift with prices; funding is cash and leaves position sizes alone.
-        .with_columns(before=pl.col("weight") * (1 + pl.col("ret")) / (1 + pl.col("gross")))
+        held.join(per_time.select("time", "gross", pl.col("carry").alias("cash")), on="time")
+        # Positions drift with prices; funding is cash: it moves the account's value, by
+        # which every weight is divided, and leaves the positions alone.
+        .with_columns(
+            before=pl.col("weight") * (1 + pl.col("ret")) / (1 + pl.col("gross") + pl.col("cash"))
+        )
         .select("symbol", pl.col("next_time").alias("time"), "before")
     )
     trades = (
         weights.select("symbol", "time", "weight")
         .join(drifted, on=["symbol", "time"], how="full", coalesce=True)
         .with_columns(pl.col("weight").fill_null(0.0), pl.col("before").fill_null(0.0))
-        .join(per_time.select("time"), on="time", how="semi")  # only rebalance times
+        .join(returns.select("time").unique(), on="time", how="semi")  # not the last time
         .with_columns(traded=(pl.col("weight") - pl.col("before")).abs())
+        .sort("time", "symbol")
     )
     if isinstance(cost_rate, pl.DataFrame):
         trades = trades.join(
@@ -220,9 +266,21 @@ def portfolio_returns(
             raise ValueError("成本表缺少某些成交的费率")
     else:
         trades = trades.with_columns(cost_rate=pl.lit(float(cost_rate)))
-    costs = trades.group_by("time").agg(
-        turnover=pl.col("traded").sum(),
-        cost=(pl.col("traded") * pl.col("cost_rate").fill_null(0.0)).sum(),
+    # Each trade belongs to the portfolio formed at its time, or, where none was formed,
+    # to the period that ends there.
+    opened = per_time.select("time", period=pl.col("time"))
+    closed = per_time.select(pl.col("next_time").alias("time"), period=pl.col("time")).join(
+        opened, on="time", how="anti"
+    )
+    costs = (
+        trades.join(pl.concat([opened, closed]), on="time")
+        .sort("period", "symbol", "time")
+        .group_by("period")
+        .agg(
+            turnover=pl.col("traded").sum(),
+            cost=(pl.col("traded") * pl.col("cost_rate").fill_null(0.0)).sum(),
+        )
+        .rename({"period": "time"})
     )
     return (
         per_time.join(costs, on="time", how="left")
@@ -247,11 +305,32 @@ def _moments(values: list[float]) -> tuple[float, float, float, float]:
     return mean, sd, skew, kurt
 
 
+def long_run_ratio(values: list[float], lags: int) -> float:
+    """How much autocorrelation inflates the variance of a mean: the Newey-West long-run
+    variance (Bartlett weights over `lags` lags) over the plain variance. Never below 1:
+    negative autocorrelation is not allowed to make a result look better. Divide a
+    Sharpe ratio or t-statistic by its square root (Lo 2002)."""
+    n = len(values)
+    mean = sum(values) / n
+    centred = [v - mean for v in values]
+    plain = sum(c * c for c in centred) / n
+    if plain == 0:
+        return 1.0
+    lags = max(0, min(lags, n - 1))
+    total = plain
+    for k in range(1, lags + 1):
+        cov = sum(centred[i] * centred[i - k] for i in range(k, n)) / n
+        total += 2 * (1 - k / (lags + 1)) * cov
+    return max(1.0, total / plain)
+
+
 def summarize(periods: pl.DataFrame, *, column: str = "net", periods_per_year: float) -> dict:
     """Annualised mean, volatility and Sharpe; t-statistic with a fat-tail standard
-    error (no allowance for autocorrelation); max drawdown; Sharpe by calendar year
-    and over the last 365 days; how many of 4 equal sub-periods had a positive mean;
-    turnover and cost per year."""
+    error; the Sharpe ratios and t-statistic again with an allowance for autocorrelation
+    over at least a week (`_hac`: divided by the square root of long_run_ratio); max
+    drawdown; Sharpe by
+    calendar year and over the last 365 days; how many of 4 equal sub-periods had a
+    positive mean; turnover and cost per year."""
     rows = periods.sort("time")
     values = rows[column].to_list()
     n = len(values)
@@ -273,6 +352,11 @@ def summarize(periods: pl.DataFrame, *, column: str = "net", periods_per_year: f
     recent = [v for t, v in zip(times, values, strict=True) if t > times[-1] - timedelta(days=365)]
     quarter = n // 4
     pieces = [values[i * quarter : (i + 1) * quarter if i < 3 else n] for i in range(4)]
+    # The usual rule, floor(4 (n/100)^(2/9)) lags, but never less than a week: funding
+    # and liquidity regimes last days, and too short a window under-corrects.
+    lags = max(int(4 * (n / 100) ** (2 / 9)), round(7 * periods_per_year / 365))
+    inflation = math.sqrt(long_run_ratio(values, lags))
+    recent_sharpe = _annual_sharpe(recent, periods_per_year)
     return {
         "periods": n,
         "mean_annual": rounded(mean * periods_per_year),
@@ -283,7 +367,13 @@ def summarize(periods: pl.DataFrame, *, column: str = "net", periods_per_year: f
         "kurtosis": rounded(kurt),
         "max_drawdown": rounded(drawdown),
         "sharpe_by_year": {k: rounded(v) for k, v in by_year.items()},
-        "sharpe_last_365_days": rounded(_annual_sharpe(recent, periods_per_year)),
+        "sharpe_last_365_days": rounded(recent_sharpe),
+        "autocorrelation_factor": rounded(inflation**2),
+        "sharpe_annual_hac": rounded(sr * math.sqrt(periods_per_year) / inflation),
+        "t_stat_hac": rounded(t_stat / inflation),
+        "sharpe_last_365_days_hac": (
+            None if recent_sharpe is None else rounded(recent_sharpe / inflation)
+        ),
         "positive_quarters": sum(sum(p) > 0 for p in pieces),
         "turnover_annual": rounded(_mean(rows, "turnover") * periods_per_year),
         "cost_annual": rounded(_mean(rows, "cost") * periods_per_year),
