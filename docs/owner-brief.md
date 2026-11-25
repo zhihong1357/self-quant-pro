@@ -68,6 +68,7 @@
 | G1 开头 | 原始数据放哪里 | 已定：谷歌云存储（决策 0010） |
 | G1 开头 | 开通谷歌云，只开存储：按[开通谷歌云](gcp-setup.md)做 | 已完成（2026-11-25，项目 `self-quant-pro`） |
 | 一直 | 不要把你的谷歌云登录交给任何智能体：存储桶的凭据是数据的硬边界（决策 0022） | 长期规则 |
+| G2 开头 | 第一代的只读令牌：按第 8 节建好，再合并决策 0024 的 PR | 待做 |
 | G3 结束（约 2027 年 1 月） | 要不要加一个历史更长的研究宇宙（U1 的确认集只能确认很强的效应，见研究可行性地图） | 待定 |
 | G4 结束 | 仓库公开还是私有 | 已定：继续公开（决策 0010） |
 | G6 开始前 | 风险上限 | 已定：做成使用者设定的参数，系统不写死（决策 0010） |
@@ -87,3 +88,25 @@
 - 开新会话时说："先读 AGENTS.md 和 docs/agent-handoff.md，然后告诉我现在在哪个阶段、下一步是什么。"
 - 让它审查别人的工作时说："你是审查者，不是作者。找出致命问题，按严重程度排序。"
 - 它说"完成了"时问："检查全过了吗？交接记录更新了吗？"
+
+## 8. 第一代的只读令牌（决策 0024）
+
+第三代每天把第一代录的数据导进存储桶，要一把只能读两个私有仓库的令牌。第一次建、以后到期换新，都按下面做。令牌只贴进 GitHub 的设置页面，**不要贴进聊天、PR 或文件**。
+
+**第一步：建令牌（约 3 分钟）**
+1. GitHub 右上角头像 → **Settings** → 左边最下面 **Developer settings** → **Personal access tokens** → **Fine-grained tokens** → **Generate new token**。
+2. **Token name** 填 `sqp-gen1-read`。
+3. **Expiration** 选 **Custom**，日期定在一年后。不要选不过期。
+4. **Repository access** 选 **Only select repositories**，再选 `fakeout-backtest` 和 `orderflow` 两个。
+5. **Permissions**：在 Repository permissions 里找到 **Contents**，设为 **Read-only**。如果界面上先要点 **Add permissions**，就点它再选 Contents。其他都不动，Metadata 会自动变成只读。
+6. 点 **Generate token**，复制出现的那串字符（以 `github_pat_` 开头）。关掉这一页就再也看不到了。
+
+**第二步：建环境，放进令牌（约 2 分钟）**
+1. 打开 self-quant-pro 仓库 → **Settings** → 左边 **Environments** → **New environment**。
+2. **Name** 填 `gen1` → **Configure environment**。
+3. **Deployment branches and tags** 选 **Selected branches and tags** → **Add deployment branch or tag rule** → Ref type 选 **Branch**，Name pattern 填 `main` → **Add rule**。
+4. 往下到 **Environment secrets** → **Add environment secret**：**Name** 填 `GEN1_READ_TOKEN`，**Value** 粘贴刚才复制的令牌 → **Add secret**。
+
+**第三步**：合并决策 0024 的 PR，然后告诉智能体"令牌放好了"。它会手动触发一次导入，确认能读到。
+
+**到期换新**：到期后每天的导入会失败，GitHub 会发邮件。按第一步建一把新的，再回到第二步的环境页面，点 `GEN1_READ_TOKEN` 旁边的铅笔，换成新的值。旧令牌在 Fine-grained tokens 列表里删掉。

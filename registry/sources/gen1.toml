@@ -1,0 +1,37 @@
+# 数据源登记：第一代录下的、无法重新获取的数据（docs/lineage.md 第 2 节，决策 0024）。
+# 导入器从这里读要归档哪些仓库的哪些分支。只读第一代，不改第一代。
+# paths：分支里无法重新获取的那部分，用来判断有没有断更；留空表示整个分支。
+# stale_after_days：这么多天没有新数据，导入就报警（运行失败，GitHub 会发邮件给所有者）。
+
+id = "gen1"
+name = "第一代的录制数据"
+
+[terms]
+checked = "未核对"
+research = "只做私有保存；哪个假说要用，注册前核对上游的条款（决策 0023）"
+publish_derived = "不在本仓库发布：派生结果只放私有存储桶（决策 0011）"
+see = "docs/decisions/0024-import-gen1-recordings.md"
+
+[[branches]]
+repo = "zhihong1357/fakeout-backtest"
+branch = "main"
+paths = ["data/gex"]
+records = "Deribit 全量期权每日快照（BTC、ETH），2026-10-26 起"
+upstream = "Deribit 公共接口"
+stale_after_days = 3
+
+[[branches]]
+repo = "zhihong1357/orderflow"
+branch = "gex-data"
+paths = ["gex_snapshots.csv"]
+records = "Deribit GEX 快照，2026-10 起"
+upstream = "Deribit 公共接口"
+stale_after_days = 2
+
+[[branches]]
+repo = "zhihong1357/orderflow"
+branch = "lab-data"
+paths = []
+records = "基差、资金费率、期权平价、美股期权流指标的定时快照，2026-11-12 起"
+upstream = "交易所公共接口、CBOE 延迟行情等，未逐项核对"
+stale_after_days = 2

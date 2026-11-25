@@ -34,3 +34,6 @@ artifacts/
 
 # 笔记本检查点
 .ipynb_checkpoints/
+
+# First-generation clones made by the gen1-import workflow (decision 0024).
+.gen1/

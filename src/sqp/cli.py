@@ -14,7 +14,7 @@ from pathlib import Path
 
 from sqp import inherit, ledger, stats, storage
 from sqp.checks import run_all
-from sqp.data import build, profile, vision
+from sqp.data import build, gen1, profile, vision
 from sqp.data.pit import PointInTime
 from sqp.repo import GitError, Repo
 
@@ -172,6 +172,25 @@ def _data_sync(args: argparse.Namespace) -> int:
     return 1 if outcome.failed or plan.capped else 0
 
 
+def _data_gen1(args: argparse.Namespace) -> int:
+    root = Path(args.repo)
+    branches = gen1.load_branches(root)
+    factory, limit = _store_factory(args)
+    store = factory()
+    room = limit - sum(store.sizes().values())
+    now = datetime.now(UTC)
+    run_id = f"{now:%Y%m%dT%H%M%SZ}-{secrets.token_hex(3)}"
+    report = gen1.import_branches(
+        branches, Path(args.clones), store, run_id=run_id, room=room, now=now
+    )
+    for line in report.lines:
+        print(line)
+    print(f"清单：{report.manifest}" if report.manifest else "没有新提交，不写清单。")
+    for alarm in report.alarms:
+        print(f"报警：{alarm}")
+    return 1 if report.alarms else 0
+
+
 def _data_build(args: argparse.Namespace) -> int:
     source = vision.load_source(Path(args.repo))
     factory, limit = _store_factory(args)
@@ -259,6 +278,11 @@ def main(argv: list[str] | None = None) -> int:
     d.add_argument("--dry-run", action="store_true", help="只列出计划，不下载")
     d.add_argument("--workers", type=int, default=16, help="并发数")
     d.set_defaults(func=_data_sync)
+    g = data_sub.add_parser("gen1", help="把第一代录下的数据连同 git 历史归档进存储（只增不改）")
+    g.add_argument("--repo", default=".", help="读哪个仓库的数据源登记和存储配置")
+    g.add_argument("--local", help="存进这个本机目录，而不是谷歌云存储桶")
+    g.add_argument("--clones", default=".gen1", help="第一代仓库的克隆放在哪里，每个仓库一个子目录")
+    g.set_defaults(func=_data_gen1)
     b = data_sub.add_parser("build", help="把存好的归档整理成研究用的月度表（只增不改）")
     b.add_argument("--repo", default=".", help="读哪个仓库的数据源登记和存储配置")
     b.add_argument("--local", help="用这个本机目录，而不是谷歌云存储桶")
