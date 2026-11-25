@@ -90,9 +90,12 @@ def _main_trials(repo_root: Path, strict: set[str]) -> tuple[str, list[trials.Tr
 
 
 def pending(repo_root: Path, store: Store) -> list[str]:
-    """Cards merged on main that have not started yet, oldest first."""
+    """Cards merged on main that have not started yet and can run now, oldest first."""
     _, cards = _main_trials(repo_root, set())
-    return [t.id for t in cards if not store.exists(started_key(t.id))]
+    waiting = [t for t in cards if not store.exists(started_key(t.id))]
+    # A repeat waits until its original has finished; if the original failed, the
+    # repeat never becomes runnable, and it must not fail every scheduled run.
+    return [t.id for t in waiting if not t.repeat_of or store.exists(completed_key(t.repeat_of))]
 
 
 def _put_marker(store: Store, key: str, doc: dict, refusal: str) -> None:

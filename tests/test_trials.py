@@ -500,3 +500,13 @@ def test_the_command_line_never_prints_an_error_message(repo, lake, studies, cap
     code = cli.main(["trial", "run", "--repo", str(repo), "--local", str(lake.root)])
     out = capsys.readouterr().out
     assert code == 1 and "ValueError" in out and "1.2345" not in out
+
+
+def test_a_repeat_waits_until_its_original_has_finished(repo, lake, studies):
+    register(
+        repo, trial(params={"mode": "crash"}), trial(params={"mode": "crash"}, repeat_of="T-0001")
+    )
+    assert run.pending(repo, lake) == ["T-0001"]
+    with pytest.raises(ValueError):
+        run.run_trial(repo, lake, "T-0001", package=studies)
+    assert run.pending(repo, lake) == []  # T-0002 can never run; it must not fail every day
