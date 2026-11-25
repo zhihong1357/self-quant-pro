@@ -155,9 +155,7 @@ def test_staleness_looks_at_the_data_not_the_branch_tip(clones: Path, store: Loc
     assert len(report.alarms) == 1 and report.alarms[0].startswith("recorder/main")
 
 
-def test_an_upload_left_by_a_failed_run_is_reused(
-    clones: Path, tmp_path: Path, store: LocalStore
-) -> None:
+def test_an_upload_left_by_a_failed_run_is_reused(clones: Path, store: LocalStore) -> None:
     class ManifestFails(LocalStore):
         def put(self, key: str, data: bytes, content_type: str | None = None) -> None:
             if key.startswith(gen1.MANIFEST_PREFIX):
@@ -166,12 +164,19 @@ def test_an_upload_left_by_a_failed_run_is_reused(
 
     with pytest.raises(OSError):
         run(clones, ManifestFails(store.root), "r1")  # type: ignore[arg-type]
-    report = run(clones, store, "r2")
+    report = run(clones, store, "r2", room=10)  # the bundles already count against the limit
     assert report.alarms == [] and report.manifest
     state = gen1.latest_state(store)
     assert len(store.keys(gen1.RAW_PREFIX)) == 2
     for record_ in state.values():
         assert record_["sha256"] == hashlib.sha256(store.get(record_["key"])).hexdigest()
+
+
+def test_a_broken_branch_does_not_stop_the_others(clones: Path, store: LocalStore) -> None:
+    branches = (gen1.Branch("someone/recorder", "renamed", (), 2), *BRANCHES)
+    report = gen1.import_branches(branches, clones, store, run_id="r1", room=10**9, now=NOW)
+    assert len(report.alarms) == 1 and "找不到分支 renamed" in report.alarms[0]
+    assert set(gen1.latest_state(store)) == {"recorder/main", "recorder/lab-data"}
 
 
 def test_the_storage_limit_is_respected(clones: Path, store: LocalStore) -> None:
@@ -191,7 +196,7 @@ def test_remote_branches_of_a_normal_clone_are_used(
     assert git(restored, "rev-parse", "refs/remotes/origin/main") == main["tip"]
 
 
-def test_shallow_and_missing_clones_are_refused(
+def test_shallow_and_missing_clones_raise_alarms(
     clones: Path, store: LocalStore, tmp_path: Path
 ) -> None:
     shallow = tmp_path / "shallow" / "recorder"
@@ -199,10 +204,11 @@ def test_shallow_and_missing_clones_are_refused(
     subprocess.run(
         ["git", "clone", "-q", "--depth", "1", "--no-single-branch", url, str(shallow)], check=True
     )
-    with pytest.raises(gen1.Gen1Error, match="浅克隆"):
-        run(shallow.parent, store, "r1")
-    with pytest.raises(gen1.Gen1Error, match="找不到克隆"):
-        run(tmp_path / "nowhere", store, "r1")
+    report = run(shallow.parent, store, "r1")
+    assert len(report.alarms) == 2 and all("浅克隆" in a for a in report.alarms)
+    report = run(tmp_path / "nowhere", store, "r2")
+    assert len(report.alarms) == 2 and all("找不到克隆" in a for a in report.alarms)
+    assert store.keys(gen1.RAW_PREFIX) == [] and report.manifest is None
 
 
 def test_the_command_fails_on_alarms(

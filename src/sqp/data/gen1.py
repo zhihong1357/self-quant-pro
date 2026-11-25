@@ -143,6 +143,76 @@ def _freshness(clone: Path, ref: str, branch: Branch, now: datetime) -> tuple[st
     return line, alarm
 
 
+def _import_one(
+    branch: Branch,
+    clone: Path,
+    store: storage.Store,
+    prev: dict | None,
+    report: Report,
+    *,
+    run_id: str,
+    room: int,
+    now: datetime,
+) -> tuple[dict | None, int]:
+    """Archive what one branch gained since the last import. Returns its new manifest
+    record (None when nothing was stored) and the bytes newly written."""
+    ref = _ref(clone, branch.branch)
+    tip = _git(clone, "rev-parse", ref)
+    base = prev["tip"] if prev else None
+    record, written = None, 0
+    if base == tip:
+        report.lines.append(f"{branch.name}：没有新提交")
+    else:
+        rewritten = base is not None and not _ok(clone, "merge-base", "--is-ancestor", base, tip)
+        if rewritten:
+            report.alarms.append(
+                f"{branch.name}：上次导入到 {base[:12]}，它已经不在现在的历史里，"
+                "说明历史被改写过。这次另存一份完整的历史，旧的照样保留"
+            )
+            base = None
+        revs = f"{base}..{ref}" if base else ref
+        key = f"{RAW_PREFIX}{branch.name}/{tip}-from-{base or 'root'}.bundle"
+        stored: bytes | None = None
+        if store.exists(key):
+            stored = store.get(
+                key
+            )  # an earlier run stored this range and stopped before its manifest
+        else:
+            data = _bundle(clone, revs)
+            if len(data) > room:
+                report.alarms.append(
+                    f"{branch.name}：要存 {len(data):,} 字节，超出存储上限，这次没存"
+                )
+            else:
+                stored = _put(store, key, data)
+                written = len(stored)
+        if stored is not None:
+            _verify(clone, stored)
+            commits = int(_git(clone, "rev-list", "--count", revs))
+            record = {
+                "name": branch.name,
+                "repo": branch.repo,
+                "branch": branch.branch,
+                "tip": tip,
+                "tip_time": _git(clone, "show", "-s", "--format=%cI", tip),
+                "base": base,
+                "commits": commits,
+                "rewritten": rewritten,
+                "key": key,
+                "bytes": len(stored),
+                "sha256": hashlib.sha256(stored).hexdigest(),
+                "run": run_id,
+            }
+            report.lines.append(
+                f"{branch.name}：新提交 {commits} 个，存为 {key}（{len(stored):,} 字节）"
+            )
+    line, alarm = _freshness(clone, ref, branch, now)
+    report.lines.append(line)
+    if alarm:
+        report.alarms.append(alarm)
+    return record, written
+
+
 def import_branches(
     branches: Iterable[Branch],
     clones: Path,
@@ -153,62 +223,30 @@ def import_branches(
     now: datetime,
 ) -> Report:
     """Store a bundle of what each branch gained since the last import, then a manifest
-    of where every branch stands. Alarms: stale data, rewritten history, no room."""
+    of where every branch stands. Alarms: stale data, rewritten history, no room, and a
+    branch that could not be read; the other branches are archived all the same."""
     report = Report()
     state = latest_state(store)
     changed = False
     for branch in branches:
-        clone = clones / branch.clone_name
-        ref = _ref(clone, branch.branch)
-        tip = _git(clone, "rev-parse", ref)
-        prev = state.get(branch.name)
-        base = prev["tip"] if prev else None
-        if base == tip:
-            report.lines.append(f"{branch.name}：没有新提交")
-        else:
-            rewritten = base is not None and not _ok(
-                clone, "merge-base", "--is-ancestor", base, tip
+        try:
+            record, written = _import_one(
+                branch,
+                clones / branch.clone_name,
+                store,
+                state.get(branch.name),
+                report,
+                run_id=run_id,
+                room=room,
+                now=now,
             )
-            if rewritten:
-                report.alarms.append(
-                    f"{branch.name}：上次导入到 {base[:12]}，它已经不在现在的历史里，"
-                    "说明历史被改写过。这次另存一份完整的历史，旧的照样保留"
-                )
-                base = None
-            revs = f"{base}..{ref}" if base else ref
-            data = _bundle(clone, revs)
-            if len(data) > room:
-                report.alarms.append(
-                    f"{branch.name}：要存 {len(data):,} 字节，超出存储上限，这次没存"
-                )
-            else:
-                key = f"{RAW_PREFIX}{branch.name}/{tip}-from-{base or 'root'}.bundle"
-                stored = _put(store, key, data)
-                _verify(clone, stored)
-                room -= len(stored)
-                commits = int(_git(clone, "rev-list", "--count", revs))
-                state[branch.name] = {
-                    "name": branch.name,
-                    "repo": branch.repo,
-                    "branch": branch.branch,
-                    "tip": tip,
-                    "tip_time": _git(clone, "show", "-s", "--format=%cI", tip),
-                    "base": base,
-                    "commits": commits,
-                    "rewritten": rewritten,
-                    "key": key,
-                    "bytes": len(stored),
-                    "sha256": hashlib.sha256(stored).hexdigest(),
-                    "run": run_id,
-                }
-                changed = True
-                report.lines.append(
-                    f"{branch.name}：新提交 {commits} 个，存为 {key}（{len(stored):,} 字节）"
-                )
-        line, alarm = _freshness(clone, ref, branch, now)
-        report.lines.append(line)
-        if alarm:
-            report.alarms.append(alarm)
+        except Gen1Error as exc:
+            report.alarms.append(f"{branch.name}：{exc}")
+            continue
+        room -= written
+        if record is not None:
+            state[branch.name] = record
+            changed = True
     if changed:
         key = f"{MANIFEST_PREFIX}{run_id}.jsonl"
         body = "".join(
