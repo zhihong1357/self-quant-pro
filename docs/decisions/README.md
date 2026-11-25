@@ -18,3 +18,5 @@
 | [0012](0012-no-self-collection-on-critical-path.md) | 研究的关键路径不依赖自己采集的数据；目前不做实盘 |
 | [0013](0013-u1-exposure-by-evidence.md) | U1 的暴露声明按实际看过的数据修正：资金费率族的确认集可用 |
 | [0014](0014-published-results-count-as-exposure.md) | 已发表的结果也算暴露：大币期现 carry 不花确认集 |
+| [0015](0015-g1-starts-now.md) | G1 现在开始，不等 finance-research；谷歌云只开存储，身份只能新建和读取 |
+| [0016](0016-model-knowledge-counts-as-exposure.md) | 预训练语言模型见过的数据也算暴露：语言模型特征在 U1 上只能前向检验 |

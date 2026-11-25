@@ -11,8 +11,8 @@
 | 1 | orderflow | 期权流（Black-76、GEX）、保守成交规则、防过拟合统计 | 参考；录下的数据要保住 |
 | 1 | VCP 扫描机器人 | 扫描 Binance、Bybit、OKX、Gate 永续合约，推 Telegram，跑在 GitHub Actions | 参考 |
 | 2 | myquant | TypeScript，只做模拟；13 项研究、20 条试验记录、27 份假说登记、21 份决策 | 参考（固定在提交 `feb6a07`） |
-| 2 | finance-research | Python，严格的科研规程、时点数据、金库、27 份决策；停在 Phase 2 | 参考（固定在提交 `a768391`）；后续约 2026-12-08 由所有者决定 |
-| 3 | self-quant-pro | 本仓库 | G0 |
+| 2 | finance-research | Python，严格的科研规程、时点数据、金库、27 份决策；停在 Phase 2 | 参考（固定在提交 `a768391`）；它自己继续还是停掉由所有者决定，和第三代脱钩（决策 0015） |
+| 3 | self-quant-pro | 本仓库 | G1 |
 
 ## 2. 继承什么：三样不可再生的东西
 
