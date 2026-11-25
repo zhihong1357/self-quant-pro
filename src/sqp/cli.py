@@ -199,7 +199,7 @@ def _data_profile(args: argparse.Namespace) -> int:
         return 1
     print(f"画像：{key}")
     print(f"指纹：{fingerprint}")
-    print(f"输入：{len(pit.read_keys)} 个分块")
+    print(f"输入：{len(pit.inputs)} 个分块")
     print("和已存的画像一模一样：重算一致。" if existed else "已写入；同名的 .md 是给人看的摘要。")
     return 0
 

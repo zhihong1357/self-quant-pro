@@ -25,3 +25,5 @@
 | [0019](0019-monthly-research-tables.md) | 把原始归档整理成研究用的月度表，每行带"何时可知"；只增不改的分块 |
 | [0020](0020-point-in-time-interface.md) | 时点接口：只能读到当时已经知道的数据；确认集要注册，金库要批准，都以合并为准 |
 | [0021](0021-exploration-profile.md) | 探索集画像：只描述、只读探索集、一条命令能重算，结果只放私有存储桶 |
+| [0022](0022-pit-hardening-after-review.md) | Gemini 独立审查后加固时点接口；写明信任边界：硬边界是存储桶的凭据 |
+| [0023](0023-g1-accepted.md) | G1 验收，STAGE 进入 G2；三项未完成的交付移到 G2 |

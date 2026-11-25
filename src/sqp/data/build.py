@@ -32,7 +32,7 @@ from sqp.storage import Store
 
 DATASET_PREFIX = "datasets/binance-vision/"
 VERSION = "v1"
-_PART = re.compile(r"/(?P<month>\d{4}-\d{2})\.r(?P<part>\d{2})\.(?P<ext>parquet|inputs\.json)$")
+_PART = re.compile(r"/(?P<month>\d{4}-\d{2})\.r(?P<part>\d{2,})\.(?P<ext>parquet|inputs\.json)$")
 _TIME = {"klines": "open_time", "funding": "calc_time"}
 
 

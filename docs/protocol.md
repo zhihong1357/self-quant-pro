@@ -21,8 +21,9 @@ U1 的边界继承自第二代：探索 2019-12-01 至 2024-01-31，确认 2024-
 
 **数据层怎么执行（第三代）。** 研究读数据的唯一入口是时点接口（`src/sqp/data/pit.py`），它只返回指定时刻之前已经可知的行。规则如下（[决策 0020](decisions/0020-point-in-time-interface.md)）：
 - 一行数据属于它变得可知的那一段。
-- 读确认集和前向数据，要有已经注册的假说；读金库，还要所有者的批准记录：`{"type": "vault", "universe": "U1", "hypothesis": "H-NNNN"}`。
-- 注册和批准都以合并进 `main` 为准。
+- 读确认集和前向数据，要有本研究宇宙已经注册的假说（状态是 registered 或 confirmed），而且只能在 GitHub Actions 的 main 上运行；读金库，还要所有者的批准记录：`{"type": "vault", "universe": "U1", "hypothesis": "H-NNNN"}`。
+- 分段、注册和批准都以合并进 `main` 为准。
+- 硬边界是存储桶的凭据：智能体的环境里没有，所有者也不要把自己的谷歌云登录交给智能体（[决策 0022](decisions/0022-pit-hardening-after-review.md)）。
 - 被拒绝的请求写进 `refusals.jsonl`。
 
 **暴露（第三代）。** "没见过的数据"是对一族假说而言的。任何一代的任何一次试验只要在某段数据上算出过绩效，这段数据对这族假说就"用掉了"。用掉的情况写在研究宇宙文件的 `[exposure]` 里，`sqp check` 对照继承记录核对，不许漏报，可以多报。对已用掉的族，确认集和金库只能当探索集用，证据只能来自 `burned_through` 之后的前向数据。U1 目前有 5 个族的确认集和金库都已用掉（[决策 0008](decisions/0008-cross-generation-accounting.md)）。只用掉了金库的族写在 `vault_burned` 里：确认集照常可用，最终检验改用前向数据；资金费率族就是这种情况（[决策 0013](decisions/0013-u1-exposure-by-evidence.md)）。声明时可以按最坏情况多报；要撤销已声明的暴露，必须用决策记录逐项写明实际用过的数据。

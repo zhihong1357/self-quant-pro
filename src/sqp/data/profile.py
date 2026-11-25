@@ -7,8 +7,9 @@ confirmation segment.
 
 The report is deterministic for the same code and inputs: no timestamps in the
 body, sorted keys, rounded numbers. Its object name carries the code commit and
-a fingerprint of the inputs, so a second run either finds the same report and
-confirms its fingerprint, or exposes non-determinism.
+a fingerprint of the inputs (the SHA-256 of every table read), so a second run
+either finds the same report and confirms its fingerprint, or exposes
+non-determinism.
 """
 
 from __future__ import annotations
@@ -66,6 +67,7 @@ def _distribution(df: pl.DataFrame) -> dict:
         "rate_quantiles": {str(q): _r(rate.quantile(q, interpolation="linear")) for q in QUANTILES},
         "annualized_mean": _r(annual.mean()),
         "annualized_median": _r(annual.median()),
+        "annualized_median_off_default": _r(annual.filter(rate != DEFAULT_RATE).median()),
         "share_positive": _r((rate > 0).mean()),
         "share_default_rate": _r((rate == DEFAULT_RATE).mean()),
         "share_extreme": _r((rate.abs() >= EXTREME).mean()),
@@ -203,7 +205,7 @@ def _pct(x: float | None) -> str:
 
 def render_markdown(report: dict) -> str:
     """A short Chinese summary for the owner; the JSON holds everything."""
-    columns = ["范围", "结算次数", "合约数", "年化均值", "年化中位数", "为正的比例"]
+    columns = ["范围", "结算次数", "合约数", "年化均值", "不含默认费率的年化中位数", "为正的比例"]
     columns += ["恰为默认费率", "极端（≥0.1%）"]
     head = ["| " + " | ".join(columns) + " |", "|" + "---|" * len(columns)]
 
@@ -212,7 +214,7 @@ def render_markdown(report: dict) -> str:
             return f"| {name} | 0 | | | | | | |"
         return (
             f"| {name} | {d['settlements']:,} | {d['contracts']} | {_pct(d['annualized_mean'])} | "
-            f"{_pct(d['annualized_median'])} | {_pct(d['share_positive'])} | "
+            f"{_pct(d['annualized_median_off_default'])} | {_pct(d['share_positive'])} | "
             f"{_pct(d['share_default_rate'])} | {_pct(d['share_extreme'])} |"
         )
 
@@ -271,9 +273,10 @@ def render_markdown(report: dict) -> str:
 def write_profile(pit: PointInTime, store: Store, repo_root: Path) -> tuple[str, str, bool]:
     """Build, then store the JSON and the summary. Returns (key, fingerprint, already there)."""
     report = build_profile(pit)
-    inputs = sorted(pit.read_keys)
+    inputs = [{"key": key, "sha256": pit.inputs[key]} for key in sorted(pit.inputs)]
     report["inputs"] = inputs
-    report["inputs_fingerprint"] = hashlib.sha256("\n".join(inputs).encode()).hexdigest()
+    lines = "".join(f"{i['key']} {i['sha256']}\n" for i in inputs)
+    report["inputs_fingerprint"] = hashlib.sha256(lines.encode()).hexdigest()
     report["code_commit"] = code_commit(repo_root)
     body = json.dumps(report, sort_keys=True, ensure_ascii=False, indent=1).encode()
     fingerprint = hashlib.sha256(body).hexdigest()
@@ -284,7 +287,7 @@ def write_profile(pit: PointInTime, store: Store, repo_root: Path) -> tuple[str,
         f"code-{code}-inputs-{report['inputs_fingerprint'][:12]}"
     )
     try:
-        store.put(stem + ".json", body)
+        store.put(stem + ".json", body, content_type="application/json; charset=utf-8")
     except ObjectExists:
         stored = hashlib.sha256(store.get(stem + ".json")).hexdigest()
         if stored != fingerprint:
@@ -292,5 +295,6 @@ def write_profile(pit: PointInTime, store: Store, repo_root: Path) -> tuple[str,
                 f"同样的代码和输入，算出的画像不一样：{stored[:16]} ≠ {fingerprint[:16]}"
             ) from None
         return stem + ".json", fingerprint, True
-    store.put(stem + ".md", render_markdown(report).encode())
+    summary = render_markdown(report).encode()
+    store.put(stem + ".md", summary, content_type="text/markdown; charset=utf-8")
     return stem + ".json", fingerprint, False

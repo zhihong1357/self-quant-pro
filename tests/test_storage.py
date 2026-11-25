@@ -57,7 +57,9 @@ class FakeBlob:
     def __init__(self, bucket: FakeBucket, name: str) -> None:
         self.bucket, self.name = bucket, name
 
-    def upload_from_string(self, data: bytes, if_generation_match: int | None = None) -> None:
+    def upload_from_string(
+        self, data: bytes, content_type: str | None = None, if_generation_match: int | None = None
+    ) -> None:
         taken = self.name in self.bucket.objects
         if taken and self.bucket.iam_first and not self.bucket.can_delete:
             raise Forbidden("overwrite needs storage.objects.delete")

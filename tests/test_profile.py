@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import shutil
+import subprocess
 import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -70,9 +71,19 @@ def lake(tmp_path: Path) -> LocalStore:
 
 @pytest.fixture
 def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A repository whose main holds U1, as the point-in-time interface requires."""
     root = tmp_path / "repo"
     (root / "registry" / "universes").mkdir(parents=True)
     shutil.copy(ROOT / "registry/universes/U1.toml", root / "registry/universes/U1.toml")
+    for args in (
+        ["init", "-q", "-b", "main"],
+        ["config", "user.email", "test@example.com"],
+        ["config", "user.name", "test"],
+        ["add", "-A"],
+        ["commit", "-qm", "main"],
+        ["update-ref", "refs/remotes/origin/main", "HEAD"],
+    ):
+        subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)
     monkeypatch.setenv("GITHUB_SHA", "0123456789abcdef0123")
     return root
 
@@ -81,7 +92,7 @@ def test_profile_reads_only_exploration_and_is_reproducible(repo: Path, lake: Lo
     pit = PointInTime(repo, lake)
     key, fingerprint, existed = profile.write_profile(pit, lake, repo)
     assert not existed
-    assert not any("2024-03" in k for k in pit.read_keys)  # confirmation month untouched
+    assert not any("2024-03" in k for k in pit.inputs)  # confirmation month untouched
     report = json.loads(lake.get(key))
     assert report["funding"]["all"]["settlements"] == len(SYMBOLS) * 2 * 90
     assert set(report["funding"]["by_year"]) == {"2021", "2022"}
