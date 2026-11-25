@@ -1,5 +1,5 @@
 """Command line: `sqp check`, `sqp power`, `sqp ledger append`, `sqp inherit scan|verify`,
-`sqp storage check`, `sqp data sync`."""
+`sqp storage check`, `sqp data sync|build`."""
 
 from __future__ import annotations
 
@@ -8,12 +8,13 @@ import json
 import secrets
 import sys
 import tomllib
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
 from sqp import inherit, ledger, stats, storage
 from sqp.checks import run_all
-from sqp.data import vision
+from sqp.data import build, vision
 from sqp.repo import GitError, Repo
 
 
@@ -110,18 +111,21 @@ def _mb(n: int) -> str:
     return f"{n / 1e6:,.1f} MB"
 
 
+def _store_factory(args: argparse.Namespace) -> tuple[Callable[[], storage.Store], int]:
+    """A store maker for this command, and the size the store may grow to."""
+    if args.local:
+        local = storage.LocalStore(Path(args.local))
+        return (lambda: local), 10**15  # this machine's disk is not billed
+    cfg = storage.load_config(Path(args.repo))
+    limit = storage.max_bucket_bytes(Path(args.repo))
+    return (lambda: storage.GcsStore(cfg["bucket"], cfg["project_id"])), limit
+
+
 def _data_sync(args: argparse.Namespace) -> int:
     root = Path(args.repo)
     source = vision.load_source(root)
     only = {s.strip() for s in args.symbols.split(",") if s.strip()} if args.symbols else None
-    if args.local:
-        local = storage.LocalStore(Path(args.local))
-        factory = lambda: local  # noqa: E731
-        limit = 10**15  # this machine's disk is not billed
-    else:
-        cfg = storage.load_config(root)
-        factory = lambda: storage.GcsStore(cfg["bucket"], cfg["project_id"])  # noqa: E731
-        limit = storage.max_bucket_bytes(root)
+    factory, limit = _store_factory(args)
     store = factory()
     sizes = store.sizes()
     total = sum(sizes.values())
@@ -165,6 +169,21 @@ def _data_sync(args: argparse.Namespace) -> int:
         for line in outcome.failed[:5]:
             print(f"  {line}")
     return 1 if outcome.failed or plan.capped else 0
+
+
+def _data_build(args: argparse.Namespace) -> int:
+    source = vision.load_source(Path(args.repo))
+    factory, limit = _store_factory(args)
+    total = sum(factory().sizes().values())
+    outcomes = build.build(source, factory, room=limit - total, workers=args.workers)
+    for dataset, outcome in outcomes.items():
+        line = f"{dataset}：新建 {outcome.parts} 个分块，{outcome.rows:,} 行，{_mb(outcome.bytes)}"
+        if outcome.duplicates:
+            line += f"；内容重复、只留一份的归档 {outcome.duplicates} 个"
+        print(line)
+        if outcome.capped:
+            print(f"  超出存储上限、这次没写：{len(outcome.capped)} 个月份")
+    return 1 if any(o.capped for o in outcomes.values()) else 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -222,6 +241,11 @@ def main(argv: list[str] | None = None) -> int:
     d.add_argument("--dry-run", action="store_true", help="只列出计划，不下载")
     d.add_argument("--workers", type=int, default=16, help="并发数")
     d.set_defaults(func=_data_sync)
+    b = data_sub.add_parser("build", help="把存好的归档整理成研究用的月度表（只增不改）")
+    b.add_argument("--repo", default=".", help="读哪个仓库的数据源登记和存储配置")
+    b.add_argument("--local", help="用这个本机目录，而不是谷歌云存储桶")
+    b.add_argument("--workers", type=int, default=16, help="并发数")
+    b.set_defaults(func=_data_build)
 
     args = parser.parse_args(argv)
     return args.func(args)

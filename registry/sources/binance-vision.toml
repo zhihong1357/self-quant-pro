@@ -1,5 +1,6 @@
 # 数据源登记：Binance 公开数据站（决策 0018）。
 # 下载器从这里读数据集和合约的规则；改这里就改了要同步什么。
+# kind 决定解析方式（src/sqp/data/parse.py）；knowable 是每行数据最早何时可知（决策 0019）。
 
 id = "binance-vision"
 name = "Binance 公开数据站（Binance Vision）"
@@ -33,24 +34,28 @@ of = "um-usdt-perp"
 
 [[datasets]]
 id = "um-funding"
+kind = "funding"
 prefix = "data/futures/um/monthly/fundingRate/{symbol}/"
 symbols = "um-usdt-perp"
 knowable = "结算时刻（calc_time）"
 
 [[datasets]]
 id = "um-klines-1h"
+kind = "klines"
 prefix = "data/futures/um/monthly/klines/{symbol}/1h/"
 symbols = "um-usdt-perp"
 knowable = "这根 K 线收盘之后（close_time）"
 
 [[datasets]]
 id = "um-mark-1h"
+kind = "klines"
 prefix = "data/futures/um/monthly/markPriceKlines/{symbol}/1h/"
 symbols = "um-usdt-perp"
 knowable = "这根 K 线收盘之后（close_time）"
 
 [[datasets]]
 id = "spot-klines-1h"
+kind = "klines"
 prefix = "data/spot/monthly/klines/{symbol}/1h/"
 symbols = "spot-of-perp"
 knowable = "这根 K 线收盘之后（close_time）；2025 年起时间戳是微秒"
