@@ -4,22 +4,28 @@ Order, so that nothing is read before it is on record:
 
 1. the card must be merged on main, and the whole trials ledger must check out;
 2. only GitHub Actions running main's code, started by a schedule or by hand;
-3. a confirmation trial first writes `ledger/confirmations/<universe>/<H>.json`;
-4. every trial writes `ledger/trials/<T>.started.json`. Both are append-only, so
-   a second run of the same card (a GitHub re-run included) is refused before it
-   reads anything, and a run that crashes after this point still counts;
-5. the study runs. Exploration trials get no `purpose`, so the point-in-time
-   interface refuses anything past exploration even for a registered hypothesis;
-6. the metrics and the standard report go to `derived/trials/<T>/`, and
+3. every trial writes `ledger/trials/<T>.started.json`, then a confirmation trial
+   also writes `ledger/confirmations/<universe>/<H>.json`. Both are append-only, so
+   a second run of the same card (a GitHub re-run included), or a second
+   confirmation of a hypothesis, is refused before it reads anything; a run that
+   crashes after the first marker still counts and is never picked up again;
+4. the study runs with a point-in-time reader limited to the card's segment:
+   exploration cards get no `purpose` and no guarded segment, a confirmation card
+   only confirmation, and so on (decision 0025);
+5. the metrics and the standard report go to `derived/trials/<T>/`, and
    `ledger/trials/<T>.completed.json` records their fingerprints.
 
 Only object names and fingerprints are printed: logs are public (decision 0011).
+Whatever the study prints is captured into `derived/trials/<T>/console.log`.
 """
 
 from __future__ import annotations
 
+import contextlib
+import copy
 import hashlib
 import importlib
+import io
 import json
 import os
 import tomllib
@@ -72,18 +78,20 @@ class Finished:
     alarms: list[str] = field(default_factory=list)
 
 
-def _main_trials(repo_root: Path) -> tuple[str, list[trials.Trial]]:
+def _main_trials(repo_root: Path, strict: set[str]) -> tuple[str, list[trials.Trial]]:
+    """The trials ledger on main. Ledger-wide rules are checked for every card; the
+    checks against other files only for the cards in `strict`."""
     text = _on_main(repo_root, trials.TRIALS) or ""
     if broken := ledger.verify(text):
         raise TrialRefused("main 上的试验账本损坏：" + "；".join(broken))
-    if found := trials.problems(text, lambda p: _on_main(repo_root, p)):
+    if found := trials.problems(text, lambda p: _on_main(repo_root, p), strict=strict):
         raise TrialRefused("main 上的试验卡有问题：" + "；".join(found))
     return text, trials.parse(text)
 
 
 def pending(repo_root: Path, store: Store) -> list[str]:
     """Cards merged on main that have not started yet, oldest first."""
-    _, cards = _main_trials(repo_root)
+    _, cards = _main_trials(repo_root, set())
     return [t.id for t in cards if not store.exists(started_key(t.id))]
 
 
@@ -135,7 +143,7 @@ def run_trial(
 ) -> Finished:
     if not trials.TRIAL_ID.match(tid):
         raise TrialRefused(f"试验编号不对：{tid!r}")
-    text, cards = _main_trials(repo_root)
+    text, cards = _main_trials(repo_root, {tid})
     trial = next((t for t in cards if t.id == tid), None)
     if trial is None:
         raise TrialRefused(f"main 上没有试验卡 {tid}：先开 PR 登记，所有者合并之后才能跑")
@@ -148,44 +156,60 @@ def run_trial(
     commit = (_git(repo_root, "rev-parse", "HEAD") or "").strip()
     stamp = {"trial": tid, "card_hash": trial.record["hash"], "code_commit": commit}
 
-    if trial.segment == "confirmation" and not trial.repeat_of:
-        _put_marker(
-            store,
-            f"{CONFIRMATIONS_PREFIX}{universe}/{trial.hypothesis}.json",
-            {**stamp, "at": _now(), **_run_info()},
-            f"{trial.hypothesis} 已经做过确认检验：每个假说只做一次",
-        )
     _put_marker(
         store,
         started_key(tid),
         {**stamp, "at": _now(), **_run_info()},
         f"{tid} 已经开始过（每张试验卡只跑一次；要再试，登记一张新卡）",
     )
+    if trial.segment == "confirmation":
+        _put_marker(
+            store,
+            f"{CONFIRMATIONS_PREFIX}{universe}/{trial.hypothesis}.json",
+            {**stamp, "at": _now(), **_run_info()},
+            f"{trial.hypothesis} 已经做过确认检验：每个假说只做一次",
+        )
 
+    params = copy.deepcopy(trial.params)  # the study may change its copy, never the card's
     pit = None
     if trial.segment != "synthetic":
-        purpose = trial.hypothesis if trial.segment in trials.GUARDED else None
-        pit = PointInTime(repo_root, store, universe=universe, purpose=purpose, cache_dir=cache_dir)
+        guarded = trial.segment in trials.GUARDED
+        pit = PointInTime(
+            repo_root,
+            store,
+            universe=universe,
+            purpose=trial.hypothesis if guarded else None,
+            cache_dir=cache_dir,
+            allowed=frozenset({trial.segment} if guarded else ()),
+        )
+    console = io.StringIO()
     try:
         study = importlib.import_module(f"{package}.{trial.study}")
-        metrics, sections = _outcome(study.run(pit, dict(trial.params)))
+        with contextlib.redirect_stdout(console), contextlib.redirect_stderr(console):
+            metrics, sections = _outcome(study.run(pit, params))
+        inputs = dict(pit.inputs) if pit is not None else {}
+        # allow_nan=False: NaN and Infinity are not JSON; a study must say what it means
+        result = json.dumps(
+            {"metrics": metrics}, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode()  # no trial id: comparable across repeats
+        counted = (
+            None if universe == "synthetic" else trials.counted(text, _read(repo_root), universe)
+        )
+        facts = {
+            "code_commit": commit,
+            "parts": len(inputs),
+            "inputs_sha256": _sha(ledger.canonical(inputs)),
+            "counted": counted,
+        }
+        report = _report(trial, card, sections, facts)
     except Exception as exc:
         # The exception's message may carry numbers, so only its type is stored and
         # shown; the run still counts as a trial (decision 0025).
         failed = {**stamp, "at": _now(), "error": type(exc).__name__, **_run_info()}
         store.put(f"{LEDGER_PREFIX}{tid}.failed.json", ledger.canonical(failed), content_type=JSON)
+        _keep_console(store, tid, console)
         raise
-
-    inputs = dict(pit.inputs) if pit is not None else {}
-    result = ledger.canonical({"metrics": metrics})  # no trial id: comparable across repeats
-    counted = None if universe == "synthetic" else trials.counted(text, _read(repo_root), universe)
-    facts = {
-        "code_commit": commit,
-        "parts": len(inputs),
-        "inputs_sha256": _sha(ledger.canonical(inputs)),
-        "counted": counted,
-    }
-    report = _report(trial, card, sections, facts)
+    _keep_console(store, tid, console)
     store.put(f"{DERIVED_PREFIX}{tid}/result.json", result, content_type=JSON)
     store.put(
         f"{DERIVED_PREFIX}{tid}/report.md", report, content_type="text/markdown; charset=utf-8"
@@ -222,6 +246,16 @@ def run_trial(
                 "并在下一个 PR 里追加一条更正"
             )
     return done
+
+
+def _keep_console(store: Store, tid: str, console: io.StringIO) -> None:
+    """What the study printed goes to the private bucket, never to the public log."""
+    if text := console.getvalue():
+        store.put(
+            f"{DERIVED_PREFIX}{tid}/console.log",
+            text.encode(),
+            content_type="text/plain; charset=utf-8",
+        )
 
 
 def _read(repo_root: Path):

@@ -81,7 +81,7 @@ U1 的边界继承自第二代：探索 2019-12-01 至 2024-01-31，确认 2024-
 
 **跨代计数（第三代）**：继承的试验按领域计入，数字在 `registry/inherited/trials.json` 的 `counted_by_domain`：目前加密 9 次、传统市场 10 次（mixed 同时计入两边）。折损用的试验次数 = 继承的 + 本代的。
 
-**怎么记（第三代）**：先登记，后运行（[决策 0025](decisions/0025-trials-registered-before-they-run.md)）。每次试验先在 `registry/ledger/trials.jsonl` 追加一张试验卡（假说编号、研究代码、数据段、参数、一句理由；动用金库时引用批准记录的 `seq`），所有者合并之后，运行框架才在 GitHub Actions 的 main 上跑它，每张卡只跑一次。卡一合并就计数，开始以后崩溃的也算。代码提交、数据和结果的指纹写在存储桶的 `ledger/trials/` 下，运行日志也打印这些指纹。
+**怎么记（第三代）**：先登记，后运行（[决策 0025](decisions/0025-trials-registered-before-they-run.md)）。每次试验先在 `registry/ledger/trials.jsonl` 追加一张试验卡（假说编号、研究代码、数据段、参数、一句理由；动用金库时引用批准记录的 `seq`），所有者合并之后，运行框架才在 GitHub Actions 的 main 上跑它，每张卡只跑一次。卡一合并就计数，开始以后崩溃的也算；为了核对可重现而登记的重跑也计数（多报可以，漏报不行）。代码提交、数据和结果的指纹写在存储桶的 `ledger/trials/` 下，运行日志也打印这些指纹。
 
 **数值放在哪里（第三代）**：由第三方数据算出的指标、报告、预测都放在私有的谷歌云存储桶里，按指纹和账本对应；公开账本里不出现这些数值（[决策 0011](decisions/0011-derived-results-stay-private.md)，`derived-results` 检查执行）。
 

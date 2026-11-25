@@ -185,12 +185,17 @@ class PointInTime:
         universe: str = "U1",
         purpose: str | None = None,
         cache_dir: Path | None = None,
+        allowed: frozenset[str] | None = None,
     ) -> None:
         self._repo_root = repo_root
         self._store = store
         self._cache_dir = cache_dir
         self._universe = universe
         self._purpose = purpose
+        # Guarded segments this reader may touch; None = any the purpose allows. The
+        # trial runner sets it from the trial card, so a card registered for one
+        # segment cannot read another (decision 0025).
+        self._allowed = None if allowed is None else frozenset(allowed)
         self._segments = load_segments(repo_root, universe)
         self._inputs: dict[str, str] = {}  # object key -> SHA-256 of the bytes read
 
@@ -268,6 +273,9 @@ class PointInTime:
         if not guarded:
             return start, end
         what = "、".join(guarded)
+        if self._allowed is not None and not set(guarded) <= self._allowed:
+            granted = "、".join(["exploration", *sorted(self._allowed)])
+            self._refuse(dataset, start, end, f"这次读取只登记了 {granted} 段，不能读{what}段")
         if not _running_main_in_actions(self._repo_root):
             reason = f"读{what}段只能在 GitHub Actions 里、由定时或手动触发、运行 main 的代码"
             self._refuse(dataset, start, end, reason)

@@ -116,7 +116,7 @@ def test_well_formed_cards_pass(cards):
         (trial(params=[1]), "params"),
         (trial(segment="later"), "segment"),
         (trial(extra=1), "不认识"),
-        (trial(segment="confirmation"), "草稿"),
+        (trial(segment="confirmation"), "状态为 registered"),
         (trial(hypothesis="H-0002", segment="vault"), "注册时没有计划"),
         (trial(segment="synthetic"), "合成数据"),
         (trial(hypothesis="H-0003"), "合成数据"),
@@ -168,30 +168,43 @@ def test_trials_count_once_registered_plus_inherited():
         trial(hypothesis="H-0003", segment="synthetic"),
         trial(params={"mode": "crash"}),
     )
-    assert trials.counted(text, read, "U1") == 9 + 2
+    assert trials.counted(text, read, "U1") == 9 + 3  # repeats count too
 
 
 # --- the runner ----------------------------------------------------------------
 
 PROBE = """
-from sqp.research.studies import SECTIONS, Outcome
+import sys
 from datetime import datetime, timezone
+
+from sqp.research.studies import SECTIONS, Outcome
+
+CALLS = []
 
 
 def run(pit, params):
     mode = params["mode"]
+    CALLS.append(1)
+    full = {s: "测试" for s in SECTIONS}
     if mode == "crash":
         raise ValueError("a message with a number 1.2345")
-    if mode == "peek":
+    if mode == "print":
+        print("mean close 1.2345")
+        sys.stderr.write("warning 6.789\\n")
+    if mode == "nan":
+        return Outcome(metrics={"x": float("nan")}, sections=full)
+    if mode == "counter":
+        return Outcome(metrics={"n": len(CALLS)}, sections=full)
+    if mode in ("peek", "confirmation"):
         pit.table("um-klines-1h", end=datetime(2024, 3, 1, tzinfo=timezone.utc))
+    params["mode"] = "changed by the study"
     rows = 0
     if pit is not None:
         end = datetime(2024, 1, 31, 23, 30, tzinfo=timezone.utc)
         rows = pit.table("um-klines-1h", end=end).height
-    sections = {s: "测试" for s in SECTIONS}
     if mode == "short":
-        sections.pop("稳健性")
-    return Outcome(metrics={"rows": rows}, sections=sections)
+        full.pop("稳健性")
+    return Outcome(metrics={"rows": rows}, sections=full)
 """
 
 
@@ -262,6 +275,13 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         card_text("H-0002", universe="U1", registered=True)
     )
     (root / "registry/hypotheses/H-0003.toml").write_text(card_text("H-0003", universe="synthetic"))
+    both = card_text("H-0004", universe="U1", registered=True)
+    both = both.replace('["confirmation"]', '["confirmation", "forward"]')
+    (root / "registry/hypotheses/H-0004.toml").write_text(both)
+    rejected = card_text("H-0005", universe="U1", registered=True)
+    (root / "registry/hypotheses/H-0005.toml").write_text(
+        rejected.replace('status = "registered"', 'status = "rejected"')
+    )
     (root / "src/sqp/research/studies").mkdir(parents=True)
     (root / STUDY_FILE).write_text("x = 1\n")
     for name in ("approvals.jsonl", "refusals.jsonl", "trials.jsonl"):
@@ -342,7 +362,8 @@ def test_a_confirmation_marker_is_written_before_any_read(repo, lake, studies):
     lake.put(marker, b"{}")  # as if an earlier run had confirmed it
     with pytest.raises(run.TrialRefused, match="只做一次"):
         run.run_trial(repo, lake, "T-0001", package=studies)
-    assert not lake.exists(run.started_key("T-0001"))
+    assert lake.exists(run.started_key("T-0001"))  # counted, and never picked up again
+    assert run.pending(repo, lake) == []
 
 
 def test_a_confirmation_trial_reads_with_the_registered_purpose(repo, lake, studies):
@@ -365,7 +386,99 @@ def test_a_synthetic_trial_gets_no_data_interface(repo, lake, studies):
     assert "累计试验次数" not in lake.get("derived/trials/T-0001/report.md").decode()
 
 
-def test_a_broken_card_on_main_stops_every_run(repo, lake, studies):
-    register(repo, trial(study="nothere"))
-    with pytest.raises(run.TrialRefused, match="试验卡有问题"):
-        run.pending(repo, lake)
+def test_a_card_that_cannot_run_is_refused_without_blocking_the_rest(repo, lake, studies):
+    register(repo, trial(study="nothere"), trial())
+    assert run.pending(repo, lake) == ["T-0001", "T-0002"]
+    with pytest.raises(run.TrialRefused, match="不存在"):
+        run.run_trial(repo, lake, "T-0001", package=studies)
+    assert not lake.exists(run.started_key("T-0001"))
+    run.run_trial(repo, lake, "T-0002", package=studies)
+
+
+# --- found by the independent review of PR #17 -------------------------------
+
+
+def test_a_forward_card_cannot_read_the_confirmation_segment(repo, lake, studies):
+    register(repo, trial(hypothesis="H-0004", segment="forward", params={"mode": "confirmation"}))
+    with pytest.raises(AccessRefused, match="只登记了"):
+        run.run_trial(repo, lake, "T-0001", package=studies)
+    assert not lake.exists("ledger/confirmations/U1/H-0004.json")
+
+
+def test_a_confirmation_card_cannot_read_forward_data(repo, lake, studies):
+    register(repo, trial(hypothesis="H-0004", segment="confirmation", params={"mode": "peek"}))
+    run.run_trial(repo, lake, "T-0001", package=studies)  # confirmation itself is fine
+    register(repo, trial(hypothesis="H-0004", segment="forward", params={"mode": "ok"}))
+    run.run_trial(repo, lake, "T-0002", package=studies)  # forward only reads exploration here
+
+
+def test_a_card_for_a_rejected_hypothesis_is_refused_before_any_marker(repo, lake, studies):
+    with (repo / trials.TRIALS).open("a") as f:  # merged before the status changed, say
+        f.write(ledger_text(trial(hypothesis="H-0005", segment="confirmation")))
+    _merge(repo)
+    with pytest.raises(run.TrialRefused, match="rejected"):
+        run.run_trial(repo, lake, "T-0001", package=studies)
+    assert not lake.exists(run.started_key("T-0001"))
+
+
+def test_an_old_card_whose_study_was_renamed_does_not_block_new_ones(repo, lake, studies):
+    register(repo, trial())
+    run.run_trial(repo, lake, "T-0001", package=studies)
+    (repo / STUDY_FILE).rename(repo / "src/sqp/research/studies/probe2.py")
+    (Path(sys.modules[studies].__file__).parent / "probe2.py").write_text(PROBE)
+    register(repo, trial(study="probe2"))
+    assert run.pending(repo, lake) == ["T-0002"]
+    run.run_trial(repo, lake, "T-0002", package=studies)
+
+
+def test_the_check_only_requires_new_cards_to_be_runnable(cards):
+    cards.write(trials.TRIALS, ledger_text(trial()))
+    base = cards.commit("register T-0001")
+    cards.remove(STUDY_FILE)
+    assert not any(v.rule == "trial-card" for v in cards.check(base))
+    cards.write(trials.TRIALS, ledger_text(trial(), trial()))
+    assert any(v.rule == "trial-card" for v in cards.check(base))  # T-0002 is new
+
+
+def test_what_the_study_prints_goes_to_the_bucket_not_the_log(repo, lake, studies, capsys):
+    register(repo, trial(params={"mode": "print"}))
+    done = run.run_trial(repo, lake, "T-0001", package=studies)
+    out = capsys.readouterr()
+    assert "1.2345" not in out.out + out.err + "\n".join(done.lines)
+    console = lake.get("derived/trials/T-0001/console.log").decode()
+    assert "1.2345" in console and "6.789" in console
+
+
+def test_metrics_that_are_not_json_fail_and_are_recorded(repo, lake, studies):
+    register(repo, trial(params={"mode": "nan"}))
+    with pytest.raises(ValueError):
+        run.run_trial(repo, lake, "T-0001", package=studies)
+    assert lake.exists("ledger/trials/T-0001.failed.json")
+
+
+def test_the_study_cannot_change_the_registered_params(repo, lake, studies):
+    register(repo, trial())
+    run.run_trial(repo, lake, "T-0001", package=studies)
+    completed = json.loads(lake.get(run.completed_key("T-0001")))
+    expected = ledger.canonical({"mode": "ok"})
+    assert completed["params_sha256"] == __import__("hashlib").sha256(expected).hexdigest()
+
+
+def test_a_repeat_with_different_results_raises_an_alarm(repo, lake, studies):
+    register(repo, trial(params={"mode": "counter"}))
+    run.run_trial(repo, lake, "T-0001", package=studies)
+    register(repo, trial(params={"mode": "counter"}, repeat_of="T-0001"))
+    done = run.run_trial(repo, lake, "T-0002", package=studies)
+    assert done.alarms and "不可重现" in done.alarms[0]
+
+
+def test_the_command_line_never_prints_an_error_message(repo, lake, studies, capsys, monkeypatch):
+    import functools
+
+    from sqp import cli
+
+    register(repo, trial(params={"mode": "crash"}))
+    monkeypatch.setattr(run, "run_trial", functools.partial(run.run_trial, package=studies))
+    code = cli.main(["trial", "run", "--repo", str(repo), "--local", str(lake.root)])
+    out = capsys.readouterr().out
+    assert code == 1 and "ValueError" in out and "1.2345" not in out

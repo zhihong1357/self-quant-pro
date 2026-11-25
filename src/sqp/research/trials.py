@@ -9,8 +9,15 @@ in the private bucket (decision 0011).
      "segment": "exploration", "params": {...}, "note": "why this trial"}
 
 Optional keys: "approval" (the seq of the owner's vault approval; required for the
-vault segment) and "repeat_of" (an earlier trial run again with the same code and
-inputs to show the result is reproducible; it does not count as a new trial).
+vault segment) and "repeat_of" (an earlier exploration or synthetic trial run again
+to show its fingerprints are reproducible). A repeat counts like any other trial:
+over-counting is allowed, under-counting is not.
+
+Rules about the ledger as a whole (one confirmation per hypothesis, what a repeat
+may point to) apply to every card. Rules that look at other files (the study code
+exists, the hypothesis is registered, the vault approval) apply to new cards and to
+the card being run, so a later status change or a renamed study never blocks the
+cards that come after it.
 """
 
 from __future__ import annotations
@@ -18,8 +25,10 @@ from __future__ import annotations
 import json
 import re
 import tomllib
-from collections.abc import Callable
+from collections.abc import Callable, Container
 from dataclasses import dataclass
+
+from sqp import ledger
 
 TRIALS = "registry/ledger/trials.jsonl"
 APPROVALS = "registry/ledger/approvals.jsonl"
@@ -27,6 +36,7 @@ INHERITED = "registry/inherited/trials.json"
 STUDIES_DIR = "src/sqp/research/studies/"
 SEGMENTS = ("exploration", "confirmation", "vault", "forward", "synthetic")
 GUARDED = frozenset({"confirmation", "vault", "forward"})
+READABLE_STATUSES = frozenset({"registered", "confirmed"})  # as in sqp.data.pit
 HYPOTHESIS = re.compile(r"^H-\d{4}$")
 STUDY = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 TRIAL_ID = re.compile(r"^T-\d{4,}$")
@@ -69,8 +79,11 @@ def parse(text: str) -> list[Trial]:
     """Every trial card in a ledger's text (the chain is checked elsewhere)."""
     trials = []
     for line in text.splitlines():
-        record = json.loads(line)
-        if isinstance(record, dict) and record.get("type") == "trial":
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue  # reported by the ledger-chain rule
+        if isinstance(record, dict) and record.get("type") == "trial" and "seq" in record:
             trials.append(Trial(trial_id(record["seq"]), record))
     return trials
 
@@ -86,6 +99,8 @@ def _card(read: Callable[[str], str | None], hypothesis: str) -> dict | None:
 
 
 def _approved(approvals: str, seq: object, universe: str, hypothesis: str) -> bool:
+    if ledger.verify(approvals):
+        return False  # a broken chain approves nothing, as in sqp.data.pit
     for line in approvals.splitlines():
         record = json.loads(line)
         if record.get("seq") == seq:
@@ -97,10 +112,14 @@ def _approved(approvals: str, seq: object, universe: str, hypothesis: str) -> bo
     return False
 
 
-def problems(text: str, read: Callable[[str], str | None]) -> list[str]:
+def problems(
+    text: str, read: Callable[[str], str | None], strict: Container[str] | None = None
+) -> list[str]:
     """What is wrong with the trial cards in a ledger, in Chinese; empty means fine.
 
     `read(path)` returns a file of the same repository state, or None if absent.
+    `strict` names the cards whose study code, hypothesis and approval are checked
+    against those files; None means every card.
     """
     found: list[str] = []
     seen: dict[str, Trial] = {}
@@ -130,8 +149,6 @@ def problems(text: str, read: Callable[[str], str | None]) -> list[str]:
             continue
         if not (isinstance(study, str) and STUDY.match(study)):
             bad("study 必须是小写字母、数字和下划线，字母开头")
-        elif read(f"{STUDIES_DIR}{study}.py") is None:
-            bad(f"研究代码 {STUDIES_DIR}{study}.py 不存在")
         if segment not in SEGMENTS:
             bad(f"segment 只能是 {'/'.join(SEGMENTS)} 之一")
             continue
@@ -139,28 +156,11 @@ def problems(text: str, read: Callable[[str], str | None]) -> list[str]:
             bad("params 必须是 JSON 对象")
         if not (isinstance(record["note"], str) and record["note"].strip()):
             bad("note 不能为空：一句话写明为什么做这次试验")
-        card = _card(read, hypothesis)
-        if card is None:
-            bad(f"假说卡 registry/hypotheses/{hypothesis}.toml 不存在或无法解析")
-            continue
-        universe = card.get("universe")
-        if (universe == "synthetic") != (segment == "synthetic"):
-            bad("合成数据的假说只能用 synthetic 段，真实数据的假说不能用 synthetic 段")
-        if segment in GUARDED:
-            planned = (card.get("registration") or {}).get("segments") or []
-            if card.get("status") == "draft":
-                bad(f"读 {segment} 段需要已注册的假说，{hypothesis} 还是草稿")
-            elif segment not in planned:
-                bad(f"{hypothesis} 注册时没有计划用 {segment} 段")
         if segment == "confirmation" and "repeat_of" not in record:
             if hypothesis in confirmed:
                 bad(f"{hypothesis} 已经有确认检验 {confirmed[hypothesis]}：每个假说只做一次")
             confirmed.setdefault(hypothesis, tid)
-        if segment == "vault":
-            approval = record.get("approval")
-            if not _approved(approvals, approval, str(universe), hypothesis):
-                bad("读金库段要写 approval：所有者批准记录的 seq（同一研究宇宙、同一假说）")
-        elif "approval" in record:
+        if "approval" in record and segment != "vault":
             bad("只有金库段的试验才写 approval")
         if "repeat_of" in record:
             original = seen.get(record["repeat_of"])
@@ -173,16 +173,46 @@ def problems(text: str, read: Callable[[str], str | None]) -> list[str]:
             elif original.params != record["params"]:
                 bad("重跑必须和原试验的 params 完全相同")
         seen[tid] = Trial(tid, record)
+        if strict is None or tid in strict:
+            found.extend(f"{tid}：{m}" for m in _runnable(record, read, approvals))
+    return found
+
+
+def _runnable(record: dict, read: Callable[[str], str | None], approvals: str) -> list[str]:
+    """Checks against other files: what a card needs to be run now."""
+    found = []
+    hypothesis, study, segment = record["hypothesis"], record["study"], record["segment"]
+    if STUDY.match(str(study)) and read(f"{STUDIES_DIR}{study}.py") is None:
+        found.append(f"研究代码 {STUDIES_DIR}{study}.py 不存在")
+    card = _card(read, hypothesis)
+    if card is None:
+        return [*found, f"假说卡 registry/hypotheses/{hypothesis}.toml 不存在或无法解析"]
+    universe = card.get("universe")
+    if (universe == "synthetic") != (segment == "synthetic"):
+        found.append("合成数据的假说只能用 synthetic 段，真实数据的假说不能用 synthetic 段")
+    if segment in GUARDED:
+        planned = (card.get("registration") or {}).get("segments") or []
+        if card.get("status") not in READABLE_STATUSES:
+            found.append(
+                f"读 {segment} 段需要状态为 registered 或 confirmed 的假说，"
+                f"{hypothesis} 现在是 {card.get('status')!r}"
+            )
+        elif segment not in planned:
+            found.append(f"{hypothesis} 注册时没有计划用 {segment} 段")
+    if segment == "vault" and not _approved(
+        approvals, record.get("approval"), str(universe), hypothesis
+    ):
+        found.append("读金库段要写 approval：所有者批准记录的 seq（同一研究宇宙、同一假说）")
     return found
 
 
 def counted(text: str, read: Callable[[str], str | None], universe: str) -> int:
-    """Trials that count against a universe: this generation's (repeats and synthetic
-    runs excluded; a card counts once it is registered, run or not) plus the
-    inherited ones of the universe's domain."""
+    """Trials that count against a universe: this generation's (synthetic runs
+    excluded; a card counts once it is registered, run or not; repeats count too)
+    plus the inherited ones of the universe's domain."""
     own = 0
     for trial in parse(text):
-        if trial.segment == "synthetic" or trial.repeat_of:
+        if trial.segment == "synthetic":
             continue
         card = _card(read, trial.hypothesis) or {}
         own += card.get("universe") == universe

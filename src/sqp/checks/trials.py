@@ -1,4 +1,5 @@
-"""Trial cards (decision 0025): every card in the trials ledger must be runnable as written."""
+"""Trial cards (decision 0025): every card added by a pull request must be runnable as
+written; the ledger-wide rules (one confirmation per hypothesis, repeats) cover all cards."""
 
 from __future__ import annotations
 
@@ -17,4 +18,8 @@ def check(repo: Repo, cfg: Governance, paths: list[str]) -> list[Violation]:
     def read(path: str) -> str | None:
         return repo.text(path) if path in files else None
 
-    return [Violation("trial-card", trials.TRIALS, p) for p in trials.problems(text, read)]
+    base = (repo.base_read(trials.TRIALS) or b"").decode("utf-8", "replace")
+    old = {t.id for t in trials.parse(base)} if repo.base is not None else set()
+    new = {t.id for t in trials.parse(text)} - old
+    found = trials.problems(text, read, strict=new)
+    return [Violation("trial-card", trials.TRIALS, p) for p in found]
