@@ -178,6 +178,11 @@ def portfolio_returns(
     pays; symbol, time, carry). cost: turnover x one-way cost rate, either a number or
     a table (symbol, time, cost_rate). Turnover is measured against the previous
     weights drifted by their returns.
+
+    Trades happen at every rebalance time that has a next one (a time in `returns`).
+    Where too few names left no new portfolio, the old one is only closed, and that
+    cost belongs to the period that ends there. The last time ends the sample:
+    positions are marked there, not closed.
     """
     held = weights.join(returns, on=["symbol", "time"], how="left")
     missing = held.filter(pl.col("ret").is_null())
@@ -212,7 +217,7 @@ def portfolio_returns(
         weights.select("symbol", "time", "weight")
         .join(drifted, on=["symbol", "time"], how="full", coalesce=True)
         .with_columns(pl.col("weight").fill_null(0.0), pl.col("before").fill_null(0.0))
-        .join(per_time.select("time"), on="time", how="semi")  # only rebalance times
+        .join(returns.select("time").unique(), on="time", how="semi")  # not the last time
         .with_columns(traded=(pl.col("weight") - pl.col("before")).abs())
     )
     if isinstance(cost_rate, pl.DataFrame):
@@ -223,9 +228,20 @@ def portfolio_returns(
             raise ValueError("成本表缺少某些成交的费率")
     else:
         trades = trades.with_columns(cost_rate=pl.lit(float(cost_rate)))
-    costs = trades.group_by("time").agg(
-        turnover=pl.col("traded").sum(),
-        cost=(pl.col("traded") * pl.col("cost_rate").fill_null(0.0)).sum(),
+    # Each trade belongs to the portfolio formed at its time, or, where none was formed,
+    # to the period that ends there.
+    opened = per_time.select("time", period=pl.col("time"))
+    closed = per_time.select(pl.col("next_time").alias("time"), period=pl.col("time")).join(
+        opened, on="time", how="anti"
+    )
+    costs = (
+        trades.join(pl.concat([opened, closed]), on="time")
+        .group_by("period")
+        .agg(
+            turnover=pl.col("traded").sum(),
+            cost=(pl.col("traded") * pl.col("cost_rate").fill_null(0.0)).sum(),
+        )
+        .rename({"period": "time"})
     )
     return (
         per_time.join(costs, on="time", how="left")

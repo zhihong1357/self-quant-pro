@@ -142,6 +142,34 @@ def test_returns_carry_turnover_and_costs_by_hand():
     assert (first["longs"], first["shorts"]) == (1, 1)
 
 
+def test_closing_at_a_time_with_too_few_names_is_charged_to_the_period_before():
+    """Portfolios at hours 0 and 2; hour 1 had too few names, so the first portfolio is
+    closed there and the second opened from cash. The last time (3) is not a trade."""
+    times = [at(0), at(1), at(2), at(3)]
+    weights = pl.DataFrame(
+        {
+            "symbol": ["X", "Y", "X", "Y"],
+            "time": [times[0]] * 2 + [times[2]] * 2,
+            "weight": [0.5, -0.5] * 2,
+        }
+    )
+    returns = pl.DataFrame(
+        {
+            "symbol": ["X", "Y"] * 3,
+            "time": [times[0]] * 2 + [times[1]] * 2 + [times[2]] * 2,
+            "next_time": [times[1]] * 2 + [times[2]] * 2 + [times[3]] * 2,
+            "ret": [0.10, -0.10, 0.0, 0.0, 0.0, 0.0],
+        }
+    )
+    first, second = engine.portfolio_returns(weights, returns, cost_rate=0.001).to_dicts()
+    closing = 0.5 * 1.1 / 1.1 + 0.5 * 0.9 / 1.1  # the drifted weights at hour 1
+    assert first["time"] == times[0]
+    assert first["turnover"] == pytest.approx(1.0 + closing)
+    assert first["cost"] == pytest.approx(0.001 * (1.0 + closing))
+    assert second["turnover"] == pytest.approx(1.0)  # from cash again; nothing at hour 3
+    assert second["net"] == pytest.approx(-0.001)
+
+
 def test_positions_earn_the_next_period_not_the_one_that_made_the_signal():
     """The look-ahead canary: a signal built from the return that just happened must
     earn the return that follows it, here zero."""
