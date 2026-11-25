@@ -4,10 +4,14 @@ The research map (section 1) and decision 0026 fix what is estimated and how the
 result is judged, before any of it is run. One module serves both, chosen by
 params["candidate"], because studies may not import each other.
 
-A, H-0002: cross-sectional funding on small and mid perpetuals. Every 8 hours, one
-minute after the settlements at 00:00, 08:00 and 16:00 UTC, sort the eligible
-contracts by their latest funding rate (scaled to 8 hours), go long the lowest fifth
-and short the highest fifth, hold to the next rebalance. Eligible: a fresh price,
+A, H-0002: cross-sectional funding on small and mid perpetuals. Every day, one minute
+after the 00:00 UTC settlement, sort the eligible contracts by the average funding rate
+(scaled to 8 hours) settled over the day that just ended, go long the lowest fifth and
+short the highest fifth, hold for a day, through three settlements. Daily, on a day's
+average, rather than every 8 hours on the latest rate: the premium the hypothesis is
+about persists for days, while a single rate is noisy, and re-sorting on noise every 8
+hours turns the book over hundreds of times a year, which at taker costs no carry can
+pay for (a rehearsal on synthetic data showed about 700 times). Eligible: a fresh price,
 median daily quote volume over the previous 30 days of at least `min_volume`, and not
 in the most liquid third of those (the large contracts, where arbitrage capital is
 plentiful and the published carry has decayed). The return has two parts, reported
@@ -27,10 +31,12 @@ estimated per contract from the previous 30 days of hourly highs, lows and close
 (Abdi and Ranaldo 2017). Maker costs (fee only) are reported as a reference.
 
 The power test (decision 0026): effect = min(half the full-sample annualised net
-Sharpe, the Sharpe over the last 365 days), and 0 unless both the full sample and 2022
-are positive. The candidate passes ("通过") if, at that effect, the probability of
-t >= 3 on the confirmation segment (639 days) is at least 80 %. Only the verdict
-reaches the public log; every number stays in the private bucket.
+Sharpe, the Sharpe over the last 365 days), both corrected for autocorrelation (the
+engine's `_hac` values: Newey-West over at least a week, never corrected upward), and 0
+unless both the full sample and 2022 are positive. The candidate passes ("通过") if,
+at that effect, the probability of t >= 3 on the confirmation segment (639 days) is at
+least 80 %. Only the verdict reaches the public log; every number stays in the
+private bucket.
 """
 
 from __future__ import annotations
@@ -207,9 +213,10 @@ def run_portfolio(
 # --- candidate A: funding ------------------------------------------------------
 
 
-def funding_signal(funding: pl.DataFrame, times: list[datetime], stale: timedelta) -> pl.DataFrame:
-    """symbol, time, value, knowable_time: the latest settled rate at each time, scaled to
-    8 hours, if it settled no more than `stale` ago."""
+def funding_signal(funding: pl.DataFrame, times: list[datetime], window: timedelta) -> pl.DataFrame:
+    """symbol, time, value, knowable_time: the average rate, scaled to 8 hours, of the
+    settlements that became knowable in (time - window, time]. A contract with none in
+    that window has no signal."""
     rates = (
         funding.select(
             "symbol",
@@ -218,24 +225,19 @@ def funding_signal(funding: pl.DataFrame, times: list[datetime], stale: timedelt
                 "value"
             ),
         )
-        .drop_nulls("value")
+        .filter(pl.col("value").is_finite())
         .sort("knowable_time")
     )
-    grid = (
-        pl.DataFrame({"time": pl.Series(times).cast(TIME)})
-        .join(rates.select("symbol").unique(), how="cross")
-        .sort("time")
-    )
-    joined = grid.join_asof(
-        rates,
-        left_on="time",
-        right_on="knowable_time",
-        by="symbol",
-        strategy="backward",
-        check_sortedness=False,  # both are sorted by time as a whole
-    )
-    return joined.filter(pl.col("time") - pl.col("knowable_time") <= stale).select(
-        "symbol", "time", "value", "knowable_time"
+    starts = pl.DataFrame({"time": pl.Series(times).cast(TIME)}).sort("time")
+    # Each settlement goes to the first rebalance at or after it became knowable.
+    assigned = rates.join_asof(
+        starts, left_on="knowable_time", right_on="time", strategy="forward"
+    ).filter(pl.col("time") - pl.col("knowable_time") < window)
+    return (
+        assigned.sort("symbol", "time", "knowable_time")
+        .group_by("symbol", "time")
+        .agg(pl.col("value").mean(), pl.col("knowable_time").max())
+        .sort("time", "symbol")
     )
 
 
@@ -267,14 +269,15 @@ def funding_carry(funding: pl.DataFrame, times: list[datetime]) -> pl.DataFrame:
 
 def candidate_a(klines: pl.DataFrame, funding: pl.DataFrame, p: dict) -> dict:
     offset = timedelta(minutes=int(p["offset_minutes"]))
-    times = rebalance_times(day(p["start"]) + offset, day(p["end"]) + offset, 8 * HOUR)
+    every = timedelta(hours=int(p["rebalance_hours"]))
+    times = rebalance_times(day(p["start"]) + offset, day(p["end"]) + offset, every)
     prices = prices_at(klines, times, max_staleness=HOUR)
     returns = period_returns(prices)
     liq = liquidity(daily_volume(klines), int(p["liquidity_days"]), int(p["liquidity_min_days"]))
     thirds = eligible_thirds(prices, liq, float(p["min_volume"]))
     small = thirds.filter((pl.col("third") <= 2) & (pl.col("time") < times[-1]))
     tradable = prices.join(small, on=["symbol", "time"], how="semi")
-    signal = funding_signal(funding, times, stale=timedelta(hours=int(p["stale_hours"])))
+    signal = funding_signal(funding, times, window=every)
     weights = quantile_weights(
         signal, tradable, groups=int(p["groups"]), long="low", min_names=int(p["min_names"])
     )
@@ -282,7 +285,8 @@ def candidate_a(klines: pl.DataFrame, funding: pl.DataFrame, p: dict) -> dict:
     taker = cost_table(spread, prices, float(p["taker_fee"]), with_spread=True)
     maker = cost_table(spread, prices, float(p["maker_fee"]), with_spread=False)
     carry = funding_carry(funding, times)
-    out, _ = run_portfolio(weights, returns, carry, taker, maker, ppy=3 * 365)
+    ppy = round(timedelta(days=365) / every)
+    out, _ = run_portfolio(weights, returns, carry, taker, maker, ppy=ppy)
     return out
 
 
@@ -339,8 +343,10 @@ def candidate_b(klines: pl.DataFrame, p: dict) -> dict:
 
 
 def power_test(summary: dict, p: dict) -> dict:
-    full = summary["sharpe_annual"]
-    recent = summary["sharpe_last_365_days"]
+    # Returns that follow each other overstate a Sharpe ratio annualised from short
+    # periods (Lo 2002): the corrected values are the ones judged.
+    full = summary["sharpe_annual_hac"]
+    recent = summary["sharpe_last_365_days_hac"]
     bear = summary["sharpe_by_year"].get(str(p["bear_year"]))
     usable = full is not None and full > 0 and bear is not None and bear > 0 and recent is not None
     effect = min(full / 2, recent) if usable else 0.0
@@ -414,7 +420,10 @@ def sections(m: dict, p: dict) -> dict:
     if c == "A":
         name = "中小合约的横截面资金费率（H-0002）"
         who = "流动性最好的三分之一除外"
-        how = "每 8 小时（结算后 1 分钟）按最近一次结算的资金费率（折算成 8 小时）"
+        how = (
+            f"每 {p['rebalance_hours']} 小时（00:00 结算后 1 分钟）"
+            "按这段时间里结算的资金费率的平均值（折算成 8 小时）"
+        )
         fallback = est["cost_fallback_share"]
         parts = (
             "拆开看（吃单）：只算价格变动的年化夏普 "
@@ -443,7 +452,8 @@ def sections(m: dict, p: dict) -> dict:
     text = {
         "结论": (
             f"候选 {c}：{name}。按吃单成本，探索集全段年化夏普 {f3(taker['sharpe_annual'])}，"
-            f"t 值 {f3(taker['t_stat'])}；最近 365 天 {f3(taker['sharpe_last_365_days'])}；"
+            f"修正自相关后 {f3(test['full_sharpe'])}（t 值 {f3(taker['t_stat_hac'])}）；"
+            f"最近 365 天修正后 {f3(test['recent_sharpe'])}；"
             f"{p['bear_year']} 年 {f3(test['bear_year_sharpe'])}。"
             f"用于功效的效应 {f3(test['effect_for_power'])}，门槛 {f3(test['hurdle'])}，"
             f"确认集上的把握 {f3(test['power'])}：功效检验{verdict}。{parts}"
@@ -462,7 +472,9 @@ def sections(m: dict, p: dict) -> dict:
             f"成本：吃单 {p['taker_fee']} 加半个买卖价差（Abdi 与 Ranaldo 2017，"
             f"用前 {p['spread_days']} 天的小时 K 线估计）；挂单 {p['maker_fee']} 只作参考。"
             f"没有自己的价差估计、按当时最宽价差收费的持仓占 {f3(fallback)}。"
-            "功效检验按决策 0026。t 值修正了偏度和峰度，没有修正自相关。"
+            "功效检验按决策 0026，用修正了自相关的夏普（Newey–West，回看至少一周，"
+            f"只往下修；这次的放大倍数 {f3(taker['autocorrelation_factor'])}）。"
+            "t 值还修正了偏度和峰度。"
             "没有模拟杠杆和强平（总敞口 1 倍）。"
         ),
         "结果": (
