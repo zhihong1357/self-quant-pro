@@ -14,6 +14,9 @@ The time rule every function keeps:
   old: a contract that stopped trading (delisted) exits at its last price, so dead
   contracts lose what they lost instead of dropping out of the sample.
 
+Form portfolios only at rebalance times that have a next one: the last time has no
+period left to earn, and a holding without a return is an error, not a zero.
+
 Weights are dollar-neutral with gross exposure 1: +1/2 spread over the long group,
 -1/2 over the short group. Costs are charged on turnover at each rebalance, as a
 one-way rate per unit of notional traded; the very last close-out is not charged.
