@@ -198,3 +198,9 @@ def run(pit, params):
 )
 def test_modules_as_values_and_rebinding_are_refused(sandbox, source):
     assert violations(sandbox, source)
+
+
+def test_the_named_pit_names_and_stats_functions_are_importable(sandbox):
+    source = "from sqp.data.pit import AccessRefused, IntegrityError, PointInTime, Segment\n"
+    source += "from sqp.stats import expected_max_sharpe, min_detectable_sharpe\n"
+    assert violations(sandbox, source) == []

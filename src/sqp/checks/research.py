@@ -194,10 +194,11 @@ def _from_import(module: str, name: str) -> tuple[object, str | None]:
             obj = getattr(importlib.import_module(module), name, _MISSING)
         except ImportError:
             return _MISSING, f"main 上还没有 {module}，不能从它导入 {name}"
-        own = getattr(obj, "__module__", None) == module
-        if (allowed is not None and name not in allowed) or not own:
-            return obj, f"不能从 {module} 导入 {name}"
-        return obj, None
+        if allowed is not None:  # an explicit list: constants such as SECTIONS are fine
+            ok = name in allowed and obj is not _MISSING and _bad_object(obj) is None
+        else:  # only what the module defines itself, never a re-export
+            ok = getattr(obj, "__module__", None) == module
+        return obj, None if ok else f"不能从 {module} 导入 {name}"
     if module == "__future__":
         return _MISSING, None
     if module not in ALLOWED_MODULES:
