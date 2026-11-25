@@ -86,7 +86,11 @@ def t_value(r: float, n: int) -> float:
 
 
 def run(pit: None, params: dict) -> Outcome:
+    if pit is not None:
+        raise ValueError("thin_slice 只用于合成数据：pit 必须是 None")
     lag, confidence = int(params["lag_months"]), float(params["confidence"])
+    if not 0 < confidence < 1:
+        raise ValueError("confidence 必须在 0 和 1 之间")
     limit = date.fromisoformat(params["clock_limit"])
     indicator, returns = generate(params)
     public = {month: y for month, knowable, y in returns if knowable <= limit}
@@ -100,12 +104,14 @@ def run(pit: None, params: dict) -> Outcome:
             x_revised.append(revised[month])
             y.append(public[decision])
     n = len(y)
+    if n < 4:
+        raise ValueError(f"只有 {n} 对，至少要 4 对才能算相关系数和置信区间")
     r_pit = statistics.correlation(x_pit, y)
     r_revised = statistics.correlation(x_revised, y)
+    if abs(r_pit) >= 1 or abs(r_revised) >= 1:
+        raise ValueError("相关系数等于 ±1：合成世界的噪声设成了 0")
     low, high = fisher(r_pit, n, confidence)
     th_pit, th_revised = theory(params)
-    previous = float(params["gen2_corr_pit"])
-    standard_error = (1 - r_pit * r_pit) / math.sqrt(n - 1)
     metrics = {
         "pairs": n,
         "pairs_differing": sum(a != b for a, b in zip(x_pit, x_revised, strict=True)),
@@ -118,9 +124,16 @@ def run(pit: None, params: dict) -> Outcome:
         "theory_pit": round(th_pit, 12),
         "theory_revised": round(th_revised, 12),
         "theory_inside_interval": low <= th_pit <= high,
-        "gen2_corr_pit": previous,
-        "gen2_gap_in_standard_errors": round(abs(r_pit - previous) / standard_error, 6),
     }
+    if "gen2_corr_pit" in params:  # only when rebuilding the second generation's result
+        previous = float(params["gen2_corr_pit"])
+        standard_error = (1 - r_pit * r_pit) / math.sqrt(n - 3)  # as the Fisher interval
+        metrics |= {
+            "gen2_corr_pit": previous,
+            "gen2_pairs": int(params["gen2_pairs"]),
+            "gen2_abs_diff": round(abs(r_pit - previous), 15),
+            "gen2_gap_in_standard_errors": round(abs(r_pit - previous) / standard_error, 6),
+        }
     return Outcome(metrics=metrics, sections=sections(metrics, params, min(public), max(public)))
 
 
@@ -131,17 +144,27 @@ def f3(v: float) -> str:
 def sections(m: dict, params: dict, first: date, last: date) -> dict:
     n, pct, lag = m["pairs"], round(float(params["confidence"]) * 100), params["lag_months"]
     inside = "落在区间内" if m["theory_inside_interval"] else "不在区间内，需要排查"
-    same = "一致" if m["gen2_gap_in_standard_errors"] <= 1 else "不一致，需要排查"
+    every = m["pairs_differing"] == n
+    differ = "每一对的时点值都和修订值不同" if every else "有些对的时点值和修订值相同，需要排查"
     gap = m["corr_revised"] - m["corr_pit"]
+    previous = ""
+    if "gen2_corr_pit" in m:
+        # Same seed and same method: the only acceptable difference is rounding noise.
+        # One standard error is the bar for data with sampling error, not for this.
+        exact = m["gen2_pairs"] == n and m["gen2_abs_diff"] < 1e-9
+        previous = (
+            f"和第二代 finance-research 的结果（{f3(m['gen2_corr_pit'])}，{m['gen2_pairs']} 对）"
+            f"相比：绝对差 {m['gen2_abs_diff']:.1e}，合 {m['gen2_gap_in_standard_errors']:.3f} "
+            f"个标准误。同一个种子、同样的方法，只允许取整误差："
+            f"{'一致' if exact else '不一致，需要排查'}。"
+        )
     text = {
         "结论": (
             f"在真相已知的合成世界里，按决策时刻能看到的首发值计算，指标与 {lag} 个月后收益的"
             f"相关系数为 {f3(m['corr_pit'])}（{pct}% 置信区间 {f3(m['corr_pit_low'])} 至 "
             f"{f3(m['corr_pit_high'])}，{n} 对），理论值 {f3(m['theory_pit'])} {inside}。"
             f"改用事后的修订值，相关系数为 {f3(m['corr_revised'])}，高出 {f3(gap)}：这就是"
-            "修订带来的前视偏差。和第二代 finance-research 的结果（"
-            f"{f3(m['gen2_corr_pit'])}）相差 {m['gen2_gap_in_standard_errors']:.3f} 个标准误，"
-            f"{same}。"
+            f"修订带来的前视偏差。{differ}。{previous}"
         ),
         "假说与机制": "见 registry/hypotheses/H-0001.toml：时点读取把修订挡在回测之外。",
         "数据": (
@@ -172,7 +195,8 @@ def sections(m: dict, params: dict, first: date, last: date) -> dict:
         "稳健性": "本次不做。换种子、换误差、换公布延迟属于 G3 的元研究。",
         "适用范围与停止条件": (
             f"只适用于这个合成世界：一个月度指标、一次修订、{lag} 个月的领先期。"
-            "结论关于流程本身，不关于任何真实市场。"
+            "它验证的是运行框架、重现链路和时点规则的数学；时点接口 sqp.data.pit 本身"
+            "不经过这里，由数据层的测试和真实数据的迁移验收覆盖。不关于任何真实市场。"
         ),
     }
     return {name: text[name] for name in SECTIONS}
