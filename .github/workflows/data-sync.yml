@@ -1,6 +1,7 @@
 name: data-sync
 
-# 把 Binance 公开数据站的月度归档原样存进私有存储桶（决策 0018）。
+# 把 Binance 公开数据站的月度归档原样存进私有存储桶（决策 0018），
+# 再整理成研究用的月度表（决策 0019）。
 # 只搬字节、不解析内容；存储桶只增不改；日志只打印计数。
 # 月度文件在每月第一个周一发布，所以每周二跑一次；也可以在 Actions 页面手动触发。
 
@@ -61,3 +62,6 @@ jobs:
           if [ -n "$SYMBOLS" ]; then args+=(--symbols "$SYMBOLS"); fi
           if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
           uv run sqp data sync "${args[@]}"
+      - name: 整理成研究用的月度表
+        if: ${{ !cancelled() && inputs.dry_run != true }}
+        run: uv run sqp data build

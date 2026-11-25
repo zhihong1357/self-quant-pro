@@ -22,3 +22,4 @@
 | [0016](0016-model-knowledge-counts-as-exposure.md) | 预训练语言模型见过的数据也算暴露：语言模型特征在 U1 上只能前向检验 |
 | [0017](0017-storage-config-and-env-check.md) | 存储配置写进仓库；新增手动触发的环境自检工作流 |
 | [0018](0018-mirror-binance-vision.md) | Binance 公开归档原样存进存储桶，逐个校验；每周的数据同步工作流 |
+| [0019](0019-monthly-research-tables.md) | 把原始归档整理成研究用的月度表，每行带"何时可知"；只增不改的分块 |

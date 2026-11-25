@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "google-cloud-storage>=3",
+    "polars>=1.30",
 ]
 
 [project.scripts]
