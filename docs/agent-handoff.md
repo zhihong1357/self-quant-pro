@@ -31,6 +31,7 @@
 
 **踩到的坑**
 - 测试里检查"有没有下载 CHECKSUM"，不能只看网址的结尾：列表请求的 marker 参数也可能以 `.CHECKSUM` 结尾。
+- `.gitignore` 里的 `data/` 会忽略任何名为 data 的目录，第一次推送时漏掉了 `src/sqp/data/`：本机测试全过，持续集成里的 ruff 却报错。已经加了例外 `!src/sqp/data/`。新建目录后，先用 `git status` 确认文件真的被加进去了。
 
 ## 2026-11-25 · Claude（Opus 5.5）· 谷歌云开通完成；存储层和环境自检
 
