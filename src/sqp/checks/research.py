@@ -11,6 +11,11 @@ around it. It is an allow-list at three levels:
 3. attribute chains on imported names (`pl.os.system`) are resolved the same way,
    step by step, as far as the checker can follow them.
 
+A module may only be used as `module.name`: not assigned to another variable,
+passed to a function or imported twice under one name, since the checker follows
+imported names, not values. Studies do not import each other; shared calculations
+belong in `sqp.stats`, which is reviewed and merged first.
+
 On top of that, some names are refused wherever they appear: private names
 (`pit._store`), names of functions that read or write files, dynamic access and
 execution (`getattr`, `eval`, `open`), names of modules that reach the rest of the
@@ -66,7 +71,8 @@ ALLOWED_MODULES = frozenset(
 # defined in that module itself (not re-exported into it).
 SQP_NAMES: dict[str, frozenset[str] | None] = {
     "sqp.data.pit": frozenset({"PointInTime", "AccessRefused", "IntegrityError", "Segment"}),
-    "sqp.stats": None,
+    "sqp.stats": None,  # functions and classes only: constants carry no __module__
+    PACKAGE: frozenset({"Outcome", "SECTIONS"}),  # the study conventions
 }
 # Built-ins that open files, run strings as code, or reach attributes by name.
 FORBIDDEN_NAMES = frozenset(
@@ -126,6 +132,11 @@ OTHER_NAMES = frozenset(
         "urllib",
         "http",
         "dependencies",
+        "warnings",  # warnings.formatwarning reads any text file through linecache
+        "linecache",
+        "config",
+        "attrgetter",
+        "methodcaller",
     }
 )
 _IO_NAME = re.compile(r"^(read|scan|write|sink|load|save|serialize|deserialize)(_|$)")
@@ -175,15 +186,14 @@ def _resolve(path: str, node: ast.ImportFrom) -> str | None:
     return ".".join([*base, *([node.module] if node.module else [])])
 
 
-def _internal(module: str) -> bool:
-    return module == PACKAGE or module.startswith(PACKAGE + ".")
-
-
 def _from_import(module: str, name: str) -> tuple[object, str | None]:
     """The object `from module import name` gives, and why it is refused (or None)."""
     if module in SQP_NAMES:
         allowed = SQP_NAMES[module]
-        obj = getattr(importlib.import_module(module), name, _MISSING)
+        try:
+            obj = getattr(importlib.import_module(module), name, _MISSING)
+        except ImportError:
+            return _MISSING, f"main 上还没有 {module}，不能从它导入 {name}"
         own = getattr(obj, "__module__", None) == module
         if (allowed is not None and name not in allowed) or not own:
             return obj, f"不能从 {module} 导入 {name}"
@@ -216,11 +226,14 @@ def _scan(path: str, source: str) -> list[Violation]:
             for alias in node.names:
                 if alias.name not in ALLOWED_MODULES or alias.name == "__future__":
                     flag(node, f"研究代码不能 import {alias.name}（只能通过 sqp.data.pit 读数据）")
-                elif alias.asname:
-                    bound[alias.asname] = importlib.import_module(alias.name)
                 else:
-                    top = alias.name.split(".")[0]
-                    bound[top] = importlib.import_module(top)
+                    local = alias.asname or alias.name.split(".")[0]
+                    if local in bound:
+                        flag(node, f"{local} 导入了两次：一个名字只能导入一次")
+                    else:
+                        bound[local] = importlib.import_module(
+                            alias.name if alias.asname else local
+                        )
         elif isinstance(node, ast.ImportFrom):
             module = _resolve(path, node)
             if module is None:
@@ -231,18 +244,56 @@ def _scan(path: str, source: str) -> list[Violation]:
                     flag(node, f"不能 from {module} import *")
                 elif reason := _bad_name(alias.name):
                     flag(node, f"不能导入 {alias.name}：{reason}")
-                elif not _internal(module):  # other study code is checked by this rule
+                elif module.startswith(PACKAGE + "."):
+                    flag(node, f"研究代码之间不互相导入（{module}）：共用的计算放进 sqp.stats")
+                else:
                     obj, reason = _from_import(module, alias.name)
+                    local = alias.asname or alias.name
                     if reason:
                         flag(node, reason)
+                    elif local in bound:
+                        flag(node, f"{local} 导入了两次：一个名字只能导入一次")
                     elif obj is not _MISSING:
-                        bound[alias.asname or alias.name] = obj
+                        bound[local] = obj
         elif isinstance(node, ast.Attribute):
-            if reason := _bad_name(node.attr):
+            polars_eval = node.attr == "eval" and _parent_attr(node) in ("list", "arr")
+            if not polars_eval and (reason := _bad_name(node.attr)):
                 flag(node, f"不能访问 .{node.attr}：{reason}")
-        elif isinstance(node, ast.Name) and (reason := _bad_name(node.id)):
+        elif isinstance(node, ast.Name) and (reason := _bad_local(node.id)):
             flag(node, f"研究代码不能用 {node.id}：{reason}")
-    return found + _chains(path, tree, bound)
+    return found + _modules_as_values(path, tree, bound) + _chains(path, tree, bound)
+
+
+def _parent_attr(node: ast.Attribute) -> str | None:
+    return node.value.attr if isinstance(node.value, ast.Attribute) else None
+
+
+def _bad_local(name: str) -> str | None:
+    """A bare name: local helpers may start with one underscore or be called load_x;
+    dunders, dangerous built-ins and the reserved module names may not."""
+    if name.startswith("__"):
+        return "解释器内部的名字"
+    if name in FORBIDDEN_NAMES:
+        return "动态访问或执行的内置函数"
+    if name in OTHER_NAMES:
+        return "能读文件、把文字当代码执行，或者能拿到别的模块"
+    return None
+
+
+def _modules_as_values(path: str, tree: ast.AST, bound: dict[str, object]) -> list[Violation]:
+    """A module may be used only as `module.name`: the checker follows names, not
+    values, so `t = typing; t.warnings` or `helper(typing)` would hide the chain."""
+    modules = {name for name, obj in bound.items() if isinstance(obj, types.ModuleType)}
+    as_attribute = {
+        id(node.value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
+    }
+    return [
+        Violation(RULE, path, f"第 {node.lineno} 行：模块 {node.id} 只能写成 {node.id}.名字")
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Name) and node.id in modules and id(node) not in as_attribute
+    ]
 
 
 def _chains(path: str, tree: ast.AST, bound: dict[str, object]) -> list[Violation]:

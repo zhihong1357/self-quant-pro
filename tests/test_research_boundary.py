@@ -19,8 +19,6 @@ from typing import Any, cast
 from sqp.data.pit import AccessRefused, PointInTime
 from sqp.stats import expected_max_sharpe
 
-from . import common
-from .common import helper
 
 
 def run(pit: PointInTime) -> dict:
@@ -149,11 +147,54 @@ def test_reexported_modules_and_attribute_forms_are_refused(sandbox, source):
         ("src/sqp/research/studies/h0001__init__.py", "from .. import run\n", True),
         ("src/sqp/research/studies/h0001.py", "from ...... import x\n", True),
         ("src/sqp/research/studies/__init__.py", "from .. import run\n", True),
-        ("src/sqp/research/studies/__init__.py", "from . import helpers\n", False),
-        ("src/sqp/research/studies/sub/mod.py", "from .. import helpers\n", False),
+        ("src/sqp/research/studies/__init__.py", "from . import helpers\n", True),
+        ("src/sqp/research/studies/sub/mod.py", "from .. import helpers\n", True),
         ("src/sqp/research/studies/sub/mod.py", "from ... import run\n", True),
-        ("src/sqp/research/studies/sub/mod.py", "from ...studies import helpers\n", False),
+        ("src/sqp/research/studies/sub/mod.py", "from ...studies import helpers\n", True),
+        ("src/sqp/research/studies/b.py", "from .a import helper\n", True),
+        ("src/sqp/research/studies/b.py", "from .a import typing\n", True),
     ],
 )
 def test_relative_imports_resolve_like_python(sandbox, path, source, refused):
     assert bool(violations(sandbox, source, path)) is refused
+
+
+# --- found by the second review of PR #16 ------------------------------------
+
+
+def test_ordinary_local_names_and_polars_list_eval_pass(sandbox):
+    source = """import polars as pl
+
+
+def _helper(df):
+    load_window = 24
+    for _ in range(2):
+        a, _ = (1, 2)
+        df = df.with_columns(pl.col("xs").list.eval(pl.element() * 2))
+        df = df.with_columns(pl.col("ys").arr.eval(pl.element() + a + load_window))
+    return df
+
+
+def run(pit, params):
+    return _helper(pl.DataFrame({"xs": [[1, 2]]}))
+"""
+    assert violations(sandbox, source) == []
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import typing\ndef run(pit):\n    t = typing\n"
+        "    return t.warnings.formatwarning('', UserWarning, '/etc/hostname', 1)\n",
+        "import typing\nx = typing.warnings\n",
+        "import polars as pl\ndef f(m):\n    return m\nf(pl)\n",
+        "import polars as pl\nmods = [pl]\n",
+        "import typing as m\nimport math as m\n",
+        "from math import sqrt\nfrom math import sqrt\n",
+        "import polars as pl\npl = 1\n",
+        "x.eval('1')\n",
+        "from linecache import getline\n",
+    ],
+)
+def test_modules_as_values_and_rebinding_are_refused(sandbox, source):
+    assert violations(sandbox, source)
