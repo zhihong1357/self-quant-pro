@@ -201,6 +201,8 @@ def _data_build(args: argparse.Namespace) -> int:
         if outcome.duplicates:
             line += f"；内容重复、只留一份的归档 {outcome.duplicates} 个"
         print(line)
+        if outcome.checksums:
+            print(f"  给以前建的分块补写校验值：{outcome.checksums} 个")
         if outcome.capped:
             print(f"  超出存储上限、这次没写：{len(outcome.capped)} 个月份")
     return 1 if any(o.capped for o in outcomes.values()) else 0

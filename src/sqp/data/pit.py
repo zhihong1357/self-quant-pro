@@ -19,6 +19,10 @@ registry/ledger/refusals.jsonl and under ledger/ in the store, where it can be
 neither changed nor deleted; if either record cannot be written, the refusal
 says so.
 
+Every part is checked against the SHA-256 written next to it at build time
+(`<part>.sha256.json`, read from the store, never from the cache), whether its
+bytes come from the store or from a local cache. A part without one is refused.
+
 Trust model. This class stops honest mistakes and makes deliberate bypasses
 visible in review; it cannot stop code in the same process that sets out to
 cheat. The hard boundary is the bucket's credentials: only workflows on main
@@ -46,7 +50,7 @@ from types import MappingProxyType
 import polars as pl
 
 from sqp import ledger
-from sqp.data.build import DATASET_PREFIX, VERSION
+from sqp.data.build import DATASET_PREFIX, VERSION, checksum_key
 from sqp.storage import Store
 
 MAIN = "refs/remotes/origin/main"
@@ -275,15 +279,28 @@ class PointInTime:
             self._refuse(dataset, start, end, f"读金库段需要所有者已合并的批准记录（{APPROVALS}）")
         return start, end
 
-    def _get(self, key: str) -> bytes:
-        if self._cache_dir is None:
-            data = self._store.get(key)
+    def _expected_sha256(self, key: str, keys: set[str]) -> str:
+        """The SHA-256 recorded for a part when it was built, read from the store, never
+        from the cache: a cache can be edited, the store cannot."""
+        name = checksum_key(key)
+        if name not in keys:
+            raise IntegrityError(f"分块没有校验值：{key}。先运行一次 sqp data build 补写")
+        doc = json.loads(self._store.get(name))
+        if doc.get("key") != key or not isinstance(doc.get("sha256"), str):
+            raise IntegrityError(f"校验值文件和分块对不上：{name}")
+        return doc["sha256"]
+
+    def _get(self, key: str, expected: str) -> bytes:
+        cached = None if self._cache_dir is None else self._cache_dir / key
+        if cached is not None and cached.is_file():
+            data = cached.read_bytes()
+            if hashlib.sha256(data).hexdigest() != expected:
+                raise IntegrityError(f"本机缓存的分块和校验值对不上：{cached}。删掉它再重跑")
         else:
-            cached = self._cache_dir / key
-            if cached.is_file():  # objects never change, so a cached copy stays valid
-                data = cached.read_bytes()
-            else:
-                data = self._store.get(key)
+            data = self._store.get(key)
+            if hashlib.sha256(data).hexdigest() != expected:
+                raise IntegrityError(f"存储里的分块和校验值对不上：{key}")
+            if cached is not None:
                 cached.parent.mkdir(parents=True, exist_ok=True)
                 fd, tmp = tempfile.mkstemp(dir=cached.parent, prefix=".tmp-")
                 try:
@@ -310,6 +327,7 @@ class PointInTime:
         start, end = self._authorize(dataset, start, end)
         prefix = f"{DATASET_PREFIX}{dataset}/{VERSION}/"
         keys = self._store.keys(prefix)
+        present = set(keys)
         committed = {k.removesuffix(".inputs.json") for k in keys if k.endswith(".inputs.json")}
         # Tables are split by the month of the event. A row becomes knowable at most a
         # little after its month ends (a kline at its close), so reading one month
@@ -325,7 +343,8 @@ class PointInTime:
             match = _PART.search(key)
             wanted = match is not None and first <= match["month"] <= last
             if wanted and key.removesuffix(".parquet") in committed:
-                frames.append(pl.read_parquet(io.BytesIO(self._get(key)), columns=wanted_columns))
+                data = self._get(key, self._expected_sha256(key, present))
+                frames.append(pl.read_parquet(io.BytesIO(data), columns=wanted_columns))
         if not frames:
             return pl.DataFrame()
         rows = pl.concat(frames).filter(pl.col("knowable_time") <= end)

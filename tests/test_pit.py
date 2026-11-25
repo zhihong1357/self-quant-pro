@@ -371,28 +371,70 @@ def test_an_empty_segment_on_main_is_rejected(repo: Path, store: LocalStore) -> 
 
 def test_part_numbers_past_99_are_read(repo: Path, store: LocalStore) -> None:
     stem = build.month_prefix(DATASET, "2024-01")
-    for ext in (".parquet", ".inputs.json"):
-        store.put(f"{stem}.r100{ext}", store.get(f"{stem}.r01{ext}"))
+    parquet = store.get(f"{stem}.r01.parquet")
+    store.put(f"{stem}.r100.parquet", parquet)
+    store.put(f"{stem}.r100.sha256.json", build.checksum_doc(f"{stem}.r100.parquet", parquet))
+    store.put(f"{stem}.r100.inputs.json", store.get(f"{stem}.r01.inputs.json"))
     rows = PointInTime(repo, store).table(DATASET, end=utc(2024, 1, 31, 23, 30))
     assert rows.height == 2  # the same bar from r01 and r100
 
 
-def test_cached_reads_fetch_each_object_once_and_fingerprint_the_bytes(
+def test_cached_reads_fetch_each_part_once_and_fingerprint_the_bytes(
     repo: Path, store: LocalStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls: list[str] = []
     original = store.get
     monkeypatch.setattr(store, "get", lambda key: calls.append(key) or original(key))
-    cache = tmp_path / "cache"
-    pit = PointInTime(repo, store, cache_dir=cache)
+    pit = PointInTime(repo, store, cache_dir=tmp_path / "cache")
     for _ in range(2):
         pit.table(DATASET, end=utc(2024, 1, 31, 23, 30))
-    assert len(calls) == len(set(calls)) == 1
-    clean = dict(pit.inputs)
-    (key,) = clean
-    (cache / key).write_bytes(original(f"{build.month_prefix(DATASET, '2024-02')}.r01.parquet"))
-    tampered = PointInTime(repo, store, cache_dir=cache)
-    tampered.table(DATASET, end=utc(2024, 1, 31, 23, 30))
-    assert tampered.inputs[key] != clean[key]  # a swapped cache file changes the fingerprint
-    with pytest.raises(IntegrityError):  # and the same reader notices a swap between reads
-        pit.table(DATASET, end=utc(2024, 1, 31, 23, 30))
+    parts = [k for k in calls if k.endswith(".parquet")]
+    assert len(parts) == len(set(parts)) == 1
+    (key,) = pit.inputs
+    assert pit.inputs[key] == json.loads(original(build.checksum_key(key)))["sha256"]
+
+
+# --- checksums of parts (roadmap G2, decision 0022) ----------------------------
+
+
+def test_a_swapped_cache_file_is_refused(repo: Path, store: LocalStore, tmp_path: Path) -> None:
+    cache = tmp_path / "cache"
+    end = utc(2024, 1, 31, 23, 30)
+    PointInTime(repo, store, cache_dir=cache).table(DATASET, end=end)
+    stem = build.month_prefix(DATASET, "2024-01")
+    other = store.get(f"{build.month_prefix(DATASET, '2024-02')}.r01.parquet")
+    (cache / f"{stem}.r01.parquet").write_bytes(other)
+    with pytest.raises(IntegrityError, match="本机缓存"):
+        PointInTime(repo, store, cache_dir=cache).table(DATASET, end=end)
+
+
+def test_a_part_whose_bytes_do_not_match_its_checksum_is_refused(
+    repo: Path, store: LocalStore
+) -> None:
+    stem = build.month_prefix(DATASET, "2024-01")
+    (store.root / f"{stem}.r01.parquet").write_bytes(b"not the part that was built")
+    with pytest.raises(IntegrityError, match="存储里的分块"):
+        PointInTime(repo, store).table(DATASET, end=utc(2024, 1, 31, 23, 30))
+
+
+def test_a_checksum_file_for_another_part_is_refused(repo: Path, store: LocalStore) -> None:
+    jan, feb = (build.month_prefix(DATASET, m) for m in ("2024-01", "2024-02"))
+    (store.root / f"{jan}.r01.sha256.json").write_bytes(store.get(f"{feb}.r01.sha256.json"))
+    with pytest.raises(IntegrityError, match="对不上"):
+        PointInTime(repo, store).table(DATASET, end=utc(2024, 1, 31, 23, 30))
+
+
+def test_parts_built_before_checksums_are_refused_until_the_next_build(
+    repo: Path, store: LocalStore
+) -> None:
+    sidecars = [k for k in store.keys(build.DATASET_PREFIX) if k.endswith(".sha256.json")]
+    assert sidecars  # every part with rows got one at build time
+    for key in sidecars:
+        (store.root / key).unlink()
+    end = utc(2024, 1, 31, 23, 30)
+    with pytest.raises(IntegrityError, match="没有校验值"):
+        PointInTime(repo, store).table(DATASET, end=end)
+    outcome = build.build(SOURCE, lambda: store, room=10**9)[DATASET]
+    assert (outcome.parts, outcome.checksums) == (0, len(sidecars))
+    assert PointInTime(repo, store).table(DATASET, end=end).height == 1
+    assert build.build(SOURCE, lambda: store, room=10**9)[DATASET].checksums == 0
