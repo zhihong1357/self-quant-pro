@@ -34,7 +34,7 @@ import polars as pl
 
 from sqp.data.parse import parse
 from sqp.data.vision import RAW_PREFIX, Source
-from sqp.storage import Store
+from sqp.storage import ObjectExists, Store
 
 DATASET_PREFIX = "datasets/binance-vision/"
 VERSION = "v1"
@@ -156,17 +156,16 @@ def build(
                     "duplicates": duplicates,
                 }
                 body = json.dumps(doc, sort_keys=True, indent=1).encode()
-                if len(buffer.getvalue()) + len(body) > room:
+                stem = f"{month_prefix(ds['id'], month)}.r{state['next']:02d}"
+                parquet = buffer.getvalue() if table is not None else b""
+                checksum = checksum_doc(stem + ".parquet", parquet) if parquet else b""
+                written = len(parquet) + len(checksum) + len(body)
+                if written > room:
                     outcome.capped.append(month)
                     continue
-                stem = f"{month_prefix(ds['id'], month)}.r{state['next']:02d}"
-                written = len(buffer.getvalue()) + len(body)
-                if table is not None:
-                    parquet = buffer.getvalue()
+                if parquet:
                     store().put(stem + ".parquet", parquet)
-                    checksum = checksum_doc(stem + ".parquet", parquet)
                     store().put(checksum_key(stem + ".parquet"), checksum)
-                    written += len(checksum)
                 store().put(stem + ".inputs.json", body)
                 room -= written
                 outcome.parts += 1
@@ -177,7 +176,9 @@ def build(
 
 
 def backfill_checksums(store: Callable[[], Store], dataset: str, pool: ThreadPoolExecutor) -> int:
-    """Write the missing checksum file of every committed parquet part; return how many."""
+    """Write the missing checksum file of every committed parquet part; return how many.
+
+    Each file is about 150 bytes, so this does not check the storage limit."""
     keys = set(store().keys(f"{DATASET_PREFIX}{dataset}/{VERSION}/"))
     missing = sorted(
         k
@@ -187,8 +188,11 @@ def backfill_checksums(store: Callable[[], Store], dataset: str, pool: ThreadPoo
         and checksum_key(k) not in keys
     )
 
-    def add(key: str) -> None:
-        store().put(checksum_key(key), checksum_doc(key, store().get(key)))
+    def add(key: str) -> bool:
+        try:
+            store().put(checksum_key(key), checksum_doc(key, store().get(key)))
+        except ObjectExists:
+            return False  # another build wrote it first; the bytes are the same
+        return True
 
-    list(pool.map(add, missing))
-    return len(missing)
+    return sum(pool.map(add, missing))

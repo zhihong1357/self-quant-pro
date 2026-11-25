@@ -438,3 +438,42 @@ def test_parts_built_before_checksums_are_refused_until_the_next_build(
     assert (outcome.parts, outcome.checksums) == (0, len(sidecars))
     assert PointInTime(repo, store).table(DATASET, end=end).height == 1
     assert build.build(SOURCE, lambda: store, room=10**9)[DATASET].checksums == 0
+
+
+@pytest.mark.parametrize("body", [b"not json", b"[1, 2]", b'{"key": 1}', b"\xff\xfe"])
+def test_a_damaged_checksum_file_is_an_integrity_error(
+    repo: Path, store: LocalStore, body: bytes
+) -> None:
+    stem = build.month_prefix(DATASET, "2024-01")
+    (store.root / f"{stem}.r01.sha256.json").write_bytes(body)
+    with pytest.raises(IntegrityError):
+        PointInTime(repo, store).table(DATASET, end=utc(2024, 1, 31, 23, 30))
+
+
+def test_a_part_with_no_rows_needs_no_checksum(repo: Path, store: LocalStore) -> None:
+    jan = f"{vision.RAW_PREFIX}{UM}BTCUSDT/1h/BTCUSDT-1h-2024-01.zip"
+    store.put(jan.replace("BTCUSDT/1h/", "BTCUSDT_SETTLED/1h/"), store.get(jan))  # same bytes
+    outcome = build.build(SOURCE, lambda: store, room=10**9)[DATASET]
+    assert (outcome.parts, outcome.rows, outcome.checksums) == (1, 0, 0)
+    stem = build.month_prefix(DATASET, "2024-01")
+    assert store.exists(f"{stem}.r02.inputs.json") and not store.exists(f"{stem}.r02.parquet")
+    assert PointInTime(repo, store).table(DATASET, end=utc(2024, 1, 31, 23, 30)).height == 1
+
+
+def test_two_builds_filling_in_the_same_checksum_do_not_fail(
+    repo: Path, store: LocalStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sidecars = [k for k in store.keys(build.DATASET_PREFIX) if k.endswith(".sha256.json")]
+    for key in sidecars:
+        (store.root / key).unlink()
+    real_keys = store.keys
+
+    def stale_keys(prefix: str = "") -> list[str]:  # as listed before the other build wrote
+        keys = real_keys(prefix)
+        for key in sidecars:
+            if not store.exists(key):
+                store.put(key, build.checksum_doc(key.replace(".sha256.json", ".parquet"), b""))
+        return keys
+
+    monkeypatch.setattr(store, "keys", stale_keys)
+    assert build.build(SOURCE, lambda: store, room=10**9)[DATASET].checksums == 0
