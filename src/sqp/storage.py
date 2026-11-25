@@ -27,7 +27,7 @@ class ObjectExists(Exception):
 
 
 class Store(Protocol):
-    def put(self, key: str, data: bytes) -> None: ...
+    def put(self, key: str, data: bytes, content_type: str | None = None) -> None: ...
     def get(self, key: str) -> bytes: ...
     def exists(self, key: str) -> bool: ...
     def keys(self, prefix: str = "") -> list[str]: ...
@@ -65,7 +65,7 @@ class LocalStore:
         _check_key(key)
         return self.root / key
 
-    def put(self, key: str, data: bytes) -> None:
+    def put(self, key: str, data: bytes, content_type: str | None = None) -> None:
         path = self._path(key)
         path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=_TMP_PREFIX)
@@ -109,13 +109,15 @@ class GcsStore:
             client = storage.Client(project=project)
         self._bucket = client.bucket(bucket)
 
-    def put(self, key: str, data: bytes) -> None:
+    def put(self, key: str, data: bytes, content_type: str | None = None) -> None:
         from google.api_core.exceptions import Forbidden, PreconditionFailed
 
         _check_key(key)
         try:
             # Generation 0 means "only if no live object has this name".
-            self._bucket.blob(key).upload_from_string(data, if_generation_match=0)
+            self._bucket.blob(key).upload_from_string(
+                data, content_type=content_type, if_generation_match=0
+            )
         except PreconditionFailed as exc:
             raise ObjectExists(key) from exc
         except Forbidden:
