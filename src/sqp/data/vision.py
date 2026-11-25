@@ -100,12 +100,12 @@ def list_prefix(fetch: Fetch, listing: str, prefix: str) -> tuple[list[Remote], 
                     last_modified=c.findtext("s:LastModified", "", _NS),
                 )
             )
-        folders.extend(p.findtext("s:Prefix", "", _NS) for p in root.findall("s:CommonPrefixes", _NS))
+        folders.extend(
+            p.findtext("s:Prefix", "", _NS) for p in root.findall("s:CommonPrefixes", _NS)
+        )
         if root.findtext("s:IsTruncated", "false", _NS) != "true":
             return objects, folders
-        marker = root.findtext("s:NextMarker", "", _NS) or max(
-            [o.key for o in objects] + folders
-        )
+        marker = root.findtext("s:NextMarker", "", _NS) or max([o.key for o in objects] + folders)
 
 
 def folder_names(folders: Iterable[str]) -> list[str]:
