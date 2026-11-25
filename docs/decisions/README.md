@@ -27,3 +27,4 @@
 | [0021](0021-exploration-profile.md) | 探索集画像：只描述、只读探索集、一条命令能重算，结果只放私有存储桶 |
 | [0022](0022-pit-hardening-after-review.md) | Gemini 独立审查后加固时点接口；写明信任边界：硬边界是存储桶的凭据 |
 | [0023](0023-g1-accepted.md) | G1 验收，STAGE 进入 G2；三项未完成的交付移到 G2 |
+| [0024](0024-import-gen1-recordings.md) | 每天导入第一代的录制数据；只读令牌放在只许 main 使用的环境里 |

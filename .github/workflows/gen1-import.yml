@@ -1,0 +1,67 @@
+name: gen1-import
+
+# 把第一代录下的、无法重新获取的数据连同 git 历史归档进私有存储桶（决策 0024）。
+# 只读第一代：用只读令牌克隆，存成 git bundle；存储桶只增不改；日志只打印对象名和计数。
+# 令牌放在环境 gen1 里，这个环境只许 main 使用。数据断更或历史被改写时运行失败，GitHub 会发邮件。
+# 每天跑一次；也可以在 Actions 页面手动触发。
+
+on:
+  schedule:
+    - cron: "41 21 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: gen1-import
+  cancel-in-progress: false
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    environment: gen1
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 克隆第一代的 fakeout-backtest（只读，完整历史）
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zhihong1357/fakeout-backtest
+          path: .gen1/fakeout-backtest
+          token: ${{ secrets.GEN1_READ_TOKEN }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: 克隆第一代的 orderflow（只读，完整历史）
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zhihong1357/orderflow
+          path: .gen1/orderflow
+          token: ${{ secrets.GEN1_READ_TOKEN }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+        with:
+          enable-cache: false
+      - name: 安装依赖
+        run: uv sync --locked
+      - name: 读取存储配置
+        id: cfg
+        run: |
+          uv run python - >> "$GITHUB_OUTPUT" <<'PY'
+          import tomllib
+          with open("config/storage.toml", "rb") as f:
+              gcp = tomllib.load(f)["gcp"]
+          print(f"provider={gcp['workload_identity_provider']}")
+          print(f"project={gcp['project_id']}")
+          PY
+      - name: 连上谷歌云（联合身份，没有密钥）
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ steps.cfg.outputs.provider }}
+          project_id: ${{ steps.cfg.outputs.project }}
+      - name: 归档
+        run: uv run sqp data gen1 --clones .gen1
