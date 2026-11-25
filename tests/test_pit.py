@@ -365,7 +365,7 @@ def test_an_empty_segment_on_main_is_rejected(repo: Path, store: LocalStore) -> 
     universe = repo / "registry/universes/U1.toml"
     universe.write_text(universe.read_text().replace("start = 2019-12-01", "start = 2024-02-01", 1))
     merge(repo)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="段是空的"):
         PointInTime(repo, store)
 
 
