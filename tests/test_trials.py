@@ -87,16 +87,19 @@ def cards(sandbox):
     sandbox.write("registry/hypotheses/H-0003.toml", card_text("H-0003", universe="synthetic"))
     sandbox.write(STUDY_FILE, "x = 1\n")
     sandbox.write("registry/ledger/approvals.jsonl", "")
+    sandbox.write(trials.TRIALS, "")
+    sandbox.base = sandbox.commit("before the pull request")
     return sandbox
 
 
 def card_problems(sandbox, *records: dict) -> list[str]:
+    """Problems with these cards, added by a pull request on top of an empty ledger."""
     sandbox.write(trials.TRIALS, ledger_text(*records))
-    return [v.message for v in sandbox.check() if v.rule == "trial-card"]
+    return [v.message for v in sandbox.check(sandbox.base) if v.rule == "trial-card"]
 
 
 def test_well_formed_cards_pass(cards):
-    assert cards.rules() == set()
+    assert cards.rules(cards.base) == set()
     good = [
         trial(),
         trial(hypothesis="H-0002", segment="confirmation"),
@@ -195,6 +198,9 @@ def run(pit, params):
         return Outcome(metrics={"x": float("nan")}, sections=full)
     if mode == "counter":
         return Outcome(metrics={"n": len(CALLS)}, sections=full)
+    if mode == "forward":
+        start = datetime(2026, 11, 1, tzinfo=timezone.utc)
+        pit.table("um-klines-1h", start=start, end=datetime(2026, 11, 2, tzinfo=timezone.utc))
     if mode in ("peek", "confirmation"):
         pit.table("um-klines-1h", end=datetime(2024, 3, 1, tzinfo=timezone.utc))
     params["mode"] = "changed by the study"
@@ -406,10 +412,14 @@ def test_a_forward_card_cannot_read_the_confirmation_segment(repo, lake, studies
 
 
 def test_a_confirmation_card_cannot_read_forward_data(repo, lake, studies):
-    register(repo, trial(hypothesis="H-0004", segment="confirmation", params={"mode": "peek"}))
-    run.run_trial(repo, lake, "T-0001", package=studies)  # confirmation itself is fine
-    register(repo, trial(hypothesis="H-0004", segment="forward", params={"mode": "ok"}))
-    run.run_trial(repo, lake, "T-0002", package=studies)  # forward only reads exploration here
+    register(repo, trial(hypothesis="H-0004", segment="confirmation", params={"mode": "forward"}))
+    with pytest.raises(AccessRefused, match="只登记了"):
+        run.run_trial(repo, lake, "T-0001", package=studies)
+
+
+def test_a_forward_card_reads_forward_data(repo, lake, studies):
+    register(repo, trial(hypothesis="H-0004", segment="forward", params={"mode": "forward"}))
+    run.run_trial(repo, lake, "T-0001", package=studies)
 
 
 def test_a_card_for_a_rejected_hypothesis_is_refused_before_any_marker(repo, lake, studies):
@@ -429,6 +439,14 @@ def test_an_old_card_whose_study_was_renamed_does_not_block_new_ones(repo, lake,
     register(repo, trial(study="probe2"))
     assert run.pending(repo, lake) == ["T-0002"]
     run.run_trial(repo, lake, "T-0002", package=studies)
+
+
+def test_without_a_base_old_cards_are_not_rechecked(cards):
+    cards.write(trials.TRIALS, ledger_text(trial(study="nothere")))
+    assert not any(v.rule == "trial-card" for v in cards.check())
+    twice = trial(hypothesis="H-0002", segment="confirmation")
+    cards.write(trials.TRIALS, ledger_text(twice, twice))
+    assert any(v.rule == "trial-card" for v in cards.check())  # ledger-wide rules still apply
 
 
 def test_the_check_only_requires_new_cards_to_be_runnable(cards):

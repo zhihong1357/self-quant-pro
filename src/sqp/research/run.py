@@ -236,15 +236,14 @@ def run_trial(
     if trial.repeat_of:
         original = json.loads(store.get(completed_key(trial.repeat_of)))
         same = all(original[k] == completed[k] for k in ("inputs_sha256", "result_sha256"))
+        was = original["code_commit"]
+        code = (
+            "代码提交相同" if was == commit else f"代码提交不同（原 {was[:12]}，现 {commit[:12]}）"
+        )
         if same:
-            done.lines.append(
-                f"和 {trial.repeat_of} 的输入、结果指纹一致：重算一致，不计试验次数。"
-            )
+            done.lines.append(f"和 {trial.repeat_of} 的输入、结果指纹一致（{code}）：重算一致。")
         else:
-            done.alarms.append(
-                f"和 {trial.repeat_of} 的指纹不一致：结果不可重现，这次要计入试验次数，"
-                "并在下一个 PR 里追加一条更正"
-            )
+            done.alarms.append(f"和 {trial.repeat_of} 的指纹不一致（{code}）：结果不可重现。")
     return done
 
 
