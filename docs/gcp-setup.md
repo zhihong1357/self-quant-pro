@@ -49,10 +49,12 @@ Cloud Shell 是谷歌云自带的网页终端，什么都不用装。
 2. 复制下面这一整行。把最后的 `你的项目ID` 换成第 2 步记下的 Project ID，粘贴进终端，按回车：
 
    ```
-   bash <(curl -fsSL https://raw.githubusercontent.com/zhihong1357/self-quant-pro/main/scripts/gcp/setup-storage.sh) 你的项目ID
+   curl -fsSLo sqp-setup.sh https://raw.githubusercontent.com/zhihong1357/self-quant-pro/main/scripts/gcp/setup-storage.sh && bash sqp-setup.sh 你的项目ID
    ```
 
-3. 屏幕上会显示项目 ID 和编号，问你确认：输入 `yes`，回车。
+   这一行先下载脚本，下载成功才运行。如果显示 `curl: (22) ... 404`，通常是这份说明所在的 PR 还没合并：先合并，再运行。
+3. 屏幕上会显示项目 ID 和编号，并问"确认无误请输入 yes 回车："。**看到这句话才输入** `yes`。
+   - 如果没看到这句话，终端就回到了 `$` 提示符，说明脚本没运行起来。这时不要输入 yes：在终端里单独输入 yes，会不停地打印 y（按 Ctrl+C 停止）。截图发给智能体。
 4. 中途如果又弹出 **Authorize Cloud Shell**，点 **Authorize**。
 5. 最后会打印三行，样子如下：
 

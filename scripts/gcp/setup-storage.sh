@@ -2,7 +2,10 @@
 # One-time Google Cloud setup for G1 (storage only, decision 0015).
 # Run it in Cloud Shell, as the project owner:
 #
-#   bash <(curl -fsSL https://raw.githubusercontent.com/zhihong1357/self-quant-pro/main/scripts/gcp/setup-storage.sh) PROJECT_ID
+#   curl -fsSLo sqp-setup.sh https://raw.githubusercontent.com/zhihong1357/self-quant-pro/main/scripts/gcp/setup-storage.sh && bash sqp-setup.sh PROJECT_ID
+#
+# Download first, run only on success: with bash <(curl ...), a 404 runs an
+# empty script silently and the owner is left at the shell prompt.
 #
 # It creates a private bucket, a Workload Identity pool/provider that only
 # admits scheduled or manual workflow runs on main of this repository, bucket
