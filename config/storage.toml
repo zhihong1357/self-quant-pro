@@ -1,0 +1,7 @@
+# Google Cloud storage (decisions 0015 and 0017). None of these values is a
+# secret: only scheduled or manual workflow runs on main of this repository can
+# use the identity, and the bucket refuses public access.
+[gcp]
+project_id = "self-quant-pro"
+workload_identity_provider = "projects/207119464670/locations/global/workloadIdentityPools/github/providers/self-quant-pro"
+bucket = "self-quant-pro-sqp-data"

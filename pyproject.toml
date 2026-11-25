@@ -4,7 +4,9 @@ version = "0.0.0"
 description = "第三代个人量化研究系统：治理骨架与研究工具"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "google-cloud-storage>=3",
+]
 
 [project.scripts]
 sqp = "sqp.cli:main"

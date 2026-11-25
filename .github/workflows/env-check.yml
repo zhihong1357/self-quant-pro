@@ -1,0 +1,58 @@
+name: env-check
+
+# 环境自检，只能手动触发（决策 0017）：
+# 1. 用联合身份连上谷歌云存储桶：能新建、能读；重复写入、覆盖、删除都被拒绝。
+# 2. GitHub 的运行器能不能访问 Binance 的公开数据。日志只打印状态码。
+# 公开仓库的日志人人可见：这里不打印任何数据内容。
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: env-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+        with:
+          enable-cache: false
+      - name: 安装依赖
+        run: uv sync --locked
+      - name: 读取存储配置
+        id: cfg
+        run: |
+          uv run python - >> "$GITHUB_OUTPUT" <<'PY'
+          import tomllib
+          with open("config/storage.toml", "rb") as f:
+              gcp = tomllib.load(f)["gcp"]
+          print(f"provider={gcp['workload_identity_provider']}")
+          print(f"project={gcp['project_id']}")
+          PY
+      - name: 连上谷歌云（联合身份，没有密钥）
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ steps.cfg.outputs.provider }}
+          project_id: ${{ steps.cfg.outputs.project }}
+      - name: 存储自检
+        run: uv run sqp storage check --expect-append-only
+      - name: Binance 公开数据能否访问（只打印状态码）
+        if: ${{ !cancelled() }}
+        run: |
+          failed=0
+          probe() {
+            code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$2" || true)"
+            echo "$1：HTTP $code"
+            [ "$code" = "200" ] || failed=1
+          }
+          probe "数据文件" "https://data.binance.vision/data/futures/um/monthly/klines/BTCUSDT/1h/BTCUSDT-1h-2024-01.zip.CHECKSUM"
+          probe "文件列表" "https://s3-ap-northeast-1.amazonaws.com/data.binance.vision?delimiter=/&prefix=data/futures/um/monthly/klines/BTCUSDT/1h/"
+          exit "$failed"

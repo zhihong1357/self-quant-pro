@@ -1,4 +1,5 @@
-"""Command line: `sqp check`, `sqp power`, `sqp ledger append`, `sqp inherit scan|verify`."""
+"""Command line: `sqp check`, `sqp power`, `sqp ledger append`, `sqp inherit scan|verify`,
+`sqp storage check`."""
 
 from __future__ import annotations
 
@@ -8,7 +9,7 @@ import sys
 import tomllib
 from pathlib import Path
 
-from sqp import inherit, ledger, stats
+from sqp import inherit, ledger, stats, storage
 from sqp.checks import run_all
 from sqp.repo import GitError, Repo
 
@@ -76,6 +77,32 @@ def _inherit_verify(args: argparse.Namespace) -> int:
     return 0
 
 
+def _storage_check(args: argparse.Namespace) -> int:
+    if args.local:
+        store: storage.Store = storage.LocalStore(Path(args.local))
+        where = "本机目录"
+    else:
+        try:
+            cfg = storage.load_config(Path(args.repo))
+            store = storage.GcsStore(cfg["bucket"], cfg["project_id"])
+        except Exception as exc:
+            print(f"连不上谷歌云存储：{type(exc).__name__}: {exc}"[:300])
+            return 2
+        where = "谷歌云存储桶"
+    steps = storage.self_check(store, expect_append_only=args.expect_append_only)
+    for step in steps:
+        line = f"{'通过' if step.ok else '失败'}  {step.name}"
+        if not step.ok and step.detail:
+            line += f"：{step.detail}"
+        print(line)
+    failed = sum(not step.ok for step in steps)
+    if failed:
+        print(f"\n{where}自检失败：{failed} 项。")
+        return 1
+    print(f"\n{where}自检全部通过。")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="sqp", description="self-quant-pro：治理检查与研究工具")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -109,6 +136,18 @@ def main(argv: list[str] | None = None) -> int:
     v = inherit_sub.add_parser("verify", help="按固定提交重新生成并逐字节比对（需要联网）")
     v.add_argument("--repo", default=".")
     v.set_defaults(func=_inherit_verify)
+
+    p = sub.add_parser("storage", help="存储工具")
+    storage_sub = p.add_subparsers(dest="storage_command", required=True)
+    c = storage_sub.add_parser("check", help="自检：写一个小标记文件，确认只增不改")
+    c.add_argument("--repo", default=".", help="读哪个仓库的 config/storage.toml")
+    c.add_argument("--local", help="检查这个本机目录，而不是谷歌云存储桶")
+    c.add_argument(
+        "--expect-append-only",
+        action="store_true",
+        help="同时确认权限层拒绝覆盖和删除；只在 GitHub 的数据工作流里用",
+    )
+    c.set_defaults(func=_storage_check)
 
     args = parser.parse_args(argv)
     return args.func(args)

@@ -2,6 +2,28 @@
 
 每次会话结束时更新这一页：最新的写在最上面，旧的往下推。只写下一个会话需要知道的事。
 
+## 2026-11-25 · Claude（Opus 5.5）· 谷歌云开通完成；存储层和环境自检
+
+**做了什么**
+- 所有者跑完开通脚本：项目 `self-quant-pro`，存储桶 `self-quant-pro-sqp-data`。
+- 决策 0017：
+  - 三项值写进 `config/storage.toml`。原因：代理不允许调用 Actions 变量的接口，而且这三项都不是密钥。
+  - 新增 `.github/workflows/env-check.yml`，只能手动触发，检查两件事：存储桶只增不改；运行器能访问 Binance 的公开数据（只打印状态码）。
+- `src/sqp/storage.py`：只增不改的存储层，有两种后端。
+  - 本机目录：先写临时文件，再用硬链接放到正式名字下。
+  - 谷歌云存储桶：写入时带 `if_generation_match=0`；如果权限层先拒绝，再查一次名字是否已经存在。
+- 新命令 `sqp storage check`：`--local` 检查本机目录；`--expect-append-only` 同时确认权限层拒绝覆盖和删除。
+- 新依赖 `google-cloud-storage`。
+
+**下一步**
+- 合并后用 `workflow_dispatch` 触发 env-check，看结果。
+  - 失败在"连上谷歌云"：检查身份提供方的条件，和 `config/storage.toml` 里的值。
+  - 失败在 Binance：改用 Colab 或 Mac mini 下载数据。
+- 然后写数据源登记和下载器（按 `.CHECKSUM` 校验；上传前检查存储桶总量）。
+
+**踩到的坑**
+- 本会话的 GitHub 代理不允许调用 Actions 变量的接口（`/actions/variables` 返回 403）。
+
 ## 2026-11-24 · Claude（Opus 5.5）· 评估 Google AI 模式的建议；决策 0016
 
 **做了什么**
