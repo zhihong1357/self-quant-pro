@@ -18,7 +18,14 @@ import pytest
 
 from sqp import ledger
 from sqp.data import build, vision
-from sqp.data.pit import APPROVALS, REFUSALS, REFUSALS_PREFIX, AccessRefused, PointInTime
+from sqp.data.pit import (
+    APPROVALS,
+    REFUSALS,
+    REFUSALS_PREFIX,
+    AccessRefused,
+    IntegrityError,
+    PointInTime,
+)
 from sqp.storage import LocalStore
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -97,9 +104,10 @@ def repo(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def actions(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Pretend to run in GitHub Actions on main."""
+    """Pretend to run in GitHub Actions on main, started by hand."""
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     monkeypatch.setenv("GITHUB_REF", "refs/heads/main")
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "workflow_dispatch")
 
 
 def register(root: Path, hypothesis: str, status: str = "registered", universe: str = "U1") -> None:
@@ -108,8 +116,9 @@ def register(root: Path, hypothesis: str, status: str = "registered", universe: 
     (root / "registry" / "hypotheses" / f"{hypothesis}.toml").write_text(card)
 
 
-def approve(root: Path, hypothesis: str, kind: str = "vault") -> None:
-    ledger.append(root / APPROVALS, {"type": kind, "universe": "U1", "hypothesis": hypothesis})
+def approve(root: Path, hypothesis: str, kind: str = "vault", universe: str = "U1") -> None:
+    record = {"type": kind, "universe": universe, "hypothesis": hypothesis}
+    ledger.append(root / APPROVALS, record)
 
 
 def refusals(root: Path) -> list[str]:
@@ -195,6 +204,28 @@ def test_guarded_reads_run_only_in_github_actions_on_main(repo: Path, store: Loc
         PointInTime(repo, store, purpose="H-0001").table(DATASET, end=utc(2024, 2, 1, 2))
 
 
+def test_pull_request_events_do_not_count_as_main(
+    repo: Path, store: LocalStore, actions: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    register(repo, "H-0001")
+    merge(repo)
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request_target")  # GITHUB_REF is main here too
+    with pytest.raises(AccessRefused, match="GitHub Actions"):
+        PointInTime(repo, store, purpose="H-0001").table(DATASET, end=utc(2024, 2, 1, 2))
+
+
+def test_running_a_commit_other_than_main_is_refused(
+    repo: Path, store: LocalStore, actions: None
+) -> None:
+    register(repo, "H-0001")
+    merge(repo)
+    (repo / "unmerged.txt").write_text("work in progress\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "not merged")  # HEAD moves on, main stays
+    with pytest.raises(AccessRefused, match="GitHub Actions"):
+        PointInTime(repo, store, purpose="H-0001").table(DATASET, end=utc(2024, 2, 1, 2))
+
+
 def test_confirmation_needs_a_merged_registration(
     repo: Path, store: LocalStore, actions: None
 ) -> None:
@@ -250,7 +281,9 @@ def test_vault_needs_a_merged_owner_approval(repo: Path, store: LocalStore, acti
     assert len(refusals(repo)) == 2
 
 
-@pytest.mark.parametrize("case", ["other hypothesis", "other type", "broken chain"])
+@pytest.mark.parametrize(
+    "case", ["other hypothesis", "other type", "other universe", "broken chain"]
+)
 def test_approvals_that_do_not_count(
     repo: Path, store: LocalStore, actions: None, case: str
 ) -> None:
@@ -260,6 +293,8 @@ def test_approvals_that_do_not_count(
         approve(repo, "H-0002")
     elif case == "other type":
         approve(repo, "H-0001", kind="confirmation")
+    elif case == "other universe":
+        approve(repo, "H-0001", universe="U2")
     else:
         approve(repo, "H-0001")
         path = repo / APPROVALS
@@ -276,6 +311,25 @@ def test_refusals_are_also_kept_in_the_store(repo: Path, store: LocalStore) -> N
     assert json.loads(store.get(key))["end"].startswith("2025-11-02")
 
 
+def test_a_refusal_that_could_not_be_stored_says_so(
+    repo: Path, store: LocalStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def broken_put(*_args: object, **_kwargs: object) -> None:
+        raise PermissionError("no write")
+
+    monkeypatch.setattr(store, "put", broken_put)
+    with pytest.raises(AccessRefused, match="存储桶"):
+        PointInTime(repo, store).table(DATASET, end=utc(2025, 11, 2))
+    assert len(refusals(repo)) == 1  # the local copy is still written
+
+
+def test_a_broken_local_ledger_does_not_stop_the_store_copy(repo: Path, store: LocalStore) -> None:
+    (repo / REFUSALS).write_text('{"not": "a ledger"}\n')
+    with pytest.raises(AccessRefused, match="本地账本"):
+        PointInTime(repo, store).table(DATASET, end=utc(2025, 11, 2))
+    assert len(store.keys(REFUSALS_PREFIX)) == 1
+
+
 # --- reading the tables -------------------------------------------------------
 
 
@@ -284,6 +338,35 @@ def test_uncommitted_parts_are_not_read(repo: Path, store: LocalStore) -> None:
         if key.endswith(".inputs.json") and "2024-01" in key:
             (store.root / key).unlink()  # simulate a part whose build never committed
     assert PointInTime(repo, store).table(DATASET, end=utc(2024, 1, 31, 23)).height == 0
+
+
+def test_only_committed_parts_of_a_month_are_read(repo: Path, store: LocalStore) -> None:
+    stem = build.month_prefix(DATASET, "2024-01")
+    store.put(f"{stem}.r02.parquet", store.get(f"{stem}.r01.parquet"))  # no .inputs.json
+    assert PointInTime(repo, store).table(DATASET, end=utc(2024, 1, 31, 23, 30)).height == 1
+
+
+def test_columns_keep_knowable_time(repo: Path, store: LocalStore) -> None:
+    rows = PointInTime(repo, store).table(DATASET, end=utc(2024, 1, 31, 23, 30), columns=["close"])
+    assert rows.columns == ["close", "knowable_time"]
+
+
+def test_identity_cannot_change_after_creation(repo: Path, store: LocalStore) -> None:
+    pit = PointInTime(repo, store, purpose="H-0001")
+    with pytest.raises(AttributeError):
+        pit.universe = "U2"  # type: ignore[misc]
+    with pytest.raises(AttributeError):
+        pit.purpose = "H-0002"  # type: ignore[misc]
+    with pytest.raises(TypeError):
+        pit.inputs["x"] = "y"  # type: ignore[index]
+
+
+def test_an_empty_segment_on_main_is_rejected(repo: Path, store: LocalStore) -> None:
+    universe = repo / "registry/universes/U1.toml"
+    universe.write_text(universe.read_text().replace("start = 2019-12-01", "start = 2024-02-01", 1))
+    merge(repo)
+    with pytest.raises(ValueError):
+        PointInTime(repo, store)
 
 
 def test_part_numbers_past_99_are_read(repo: Path, store: LocalStore) -> None:
@@ -311,3 +394,5 @@ def test_cached_reads_fetch_each_object_once_and_fingerprint_the_bytes(
     tampered = PointInTime(repo, store, cache_dir=cache)
     tampered.table(DATASET, end=utc(2024, 1, 31, 23, 30))
     assert tampered.inputs[key] != clean[key]  # a swapped cache file changes the fingerprint
+    with pytest.raises(IntegrityError):  # and the same reader notices a swap between reads
+        pit.table(DATASET, end=utc(2024, 1, 31, 23, 30))
