@@ -16,7 +16,7 @@
 - 候选 B：前一日收益改用最后一小时的成交均价计算，避开买卖价差来回跳动造成的假反转（有专门的测试）。
 
 **彩排怎么做**（以后改引擎或研究代码时照做）
-- `/tmp/rehearse/make_lake3.py` 造 90 个合约的合成归档，含暴跌后下架、全交易所维护、零星缺 K 线；`build.build` 建进本机存储。
+- 步骤见 `scripts/rehearsal/README.md`。`make_lake.py` 造 90 个合约的合成归档，含暴跌后下架、全交易所维护、零星缺 K 线。
 - 把仓库克隆到临时目录，在那里追加要试的试验卡，然后 `git update-ref refs/remotes/origin/main HEAD`，只改临时副本。
 - `GITHUB_ACTIONS=true GITHUB_REF=refs/heads/main GITHUB_EVENT_NAME=workflow_dispatch uv run sqp trial run --repo <副本> --local <存储>`。
 - 最近一次：五张卡 7 秒跑完，内存 673 MB；对照"通过"；没有植入优势的 A、B 都"不通过"。
