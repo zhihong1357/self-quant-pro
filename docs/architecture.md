@@ -29,8 +29,9 @@ G0 只有治理层。其余各层按[路线图](roadmap.md)逐个阶段加入，
 | `config/` | 治理、科研规程、继承规则、谷歌云存储的配置（冻结） |
 | `docs/` | 宪章、规程、架构、路线图、决策记录等 |
 | `registry/` | 继承记录、研究宇宙、假说卡、三本账、数据源登记（`registry/sources/`） |
-| `src/sqp/` | 治理检查与研究工具；`storage.py` 是只增不改的存储层（本机目录或谷歌云存储桶）；`data/` 是数据层（G1）：`vision.py` 同步原始归档，`parse.py` 和 `build.py` 整理成月度表，`pit.py` 是研究读数据的唯一入口（时点接口和金库守卫），`profile.py` 是探索集画像 |
-| `scripts/gcp/` | 所有者在 Cloud Shell 里运行的一次性设置脚本（[开通谷歌云](gcp-setup.md)） |
+| `src/sqp/` | 治理检查与研究工具；`storage.py` 是只增不改的存储层（本机目录或谷歌云存储桶）；`data/` 是数据层（G1）：`vision.py` 同步原始归档，`binance_api.py` 在谷歌云东京区每天从 Binance 交易接口录公开行情（决策 0027），`parse.py` 和 `build.py` 整理成月度表，`pit.py` 是研究读数据的唯一入口（时点接口和金库守卫），`profile.py` 是探索集画像 |
+| `scripts/gcp/` | 所有者在 Cloud Shell 里运行的一次性设置脚本（[开通谷歌云](gcp-setup.md)、[开通录制任务](gcp-recorder.md)） |
+| `scripts/recorder/` | 录制任务在谷歌云上运行时的入口：每次从 main 取一个固定提交的代码，用锁定的依赖运行 |
 | `scripts/rehearsal/` | 在合成数据上把试验从头跑一遍（彩排），改引擎或研究代码之后用 |
 | `tests/` | 测试，含 G0 验收测试 `test_acceptance.py` |
 | `.github/` | 持续集成、PR 模板、手动触发的环境自检 `env-check.yml`、每周的数据同步 `data-sync.yml`、手动触发的探索集画像 `profile.yml` |

@@ -1,0 +1,57 @@
+# 数据源登记：Binance U 本位合约的公开行情接口（决策 0027）。
+# 录制代码在 src/sqp/data/binance_api.py，接口清单（PATHS）和频率限制都写在那里；
+# 这里写条款和每个数据集的含义。录制任务在谷歌云东京区运行（scripts/gcp/setup-recorder.sh）。
+
+id = "binance-api-um"
+name = "Binance U 本位合约公开行情接口"
+site = "https://fapi.binance.com"
+raw_prefix = "raw/binance-api/um/"
+manifests = "manifests/binance-api/um/"
+
+[terms]
+license = "Binance 用户条款（生效日 2026-10-27）；禁止国家名单 2026-01-05 版"
+checked = 2026-11-26
+research = "允许：第 27 条许可非商业的个人使用或内部业务使用"
+publish_derived = "条款没有写明，按不允许；派生结果只放私有存储桶（决策 0011）"
+live_trading = "条款预期用户自己搭建自动交易系统（第 33.7 条）；使用者不能位于禁止国家名单上的地区，也不能位于使用违法的地区（第 2.1 条），实盘之前按所有者当时的居住地核对"
+where = "GitHub 的服务器在美国（名单第 1 组）不能用；东京区不在名单上"
+see = "docs/compliance.md"
+
+# 每个数据集：怎么取、存什么、何时可知。快照每次运行一份，历史数据按窗口接着上次录。
+[[datasets]]
+id = "exchange-info"
+kind = "snapshot"
+path = "/fapi/v1/exchangeInfo"
+content = "全部合约的列表、状态（交易中、下架中等）、上市日期、交易规则"
+knowable = "录制时刻（fetched_at）"
+
+[[datasets]]
+id = "premium-index"
+kind = "snapshot"
+path = "/fapi/v1/premiumIndex"
+content = "每个合约的标记价格、指数价格、上一次资金费率、下一次结算时间"
+knowable = "录制时刻（fetched_at）"
+
+[[datasets]]
+id = "funding"
+kind = "history"
+path = "/fapi/v1/fundingRate"
+content = "每次结算的资金费率，所有合约一起按小时取"
+knowable = "结算时刻（fundingTime）"
+retention = "接口保留全部历史"
+
+[[datasets]]
+id = "klines-30m"
+kind = "history"
+path = "/fapi/v1/klines"
+content = "USDT 永续合约的 30 分钟 K 线，逐个合约取；两根合成一根 1 小时（决策 0029）"
+knowable = "这根 K 线收盘之后（close time）"
+retention = "接口保留全部历史；已下架的合约查不到"
+
+[[datasets]]
+id = "open-interest-30m"
+kind = "history"
+path = "/futures/data/openInterestHist"
+content = "USDT 永续合约每 30 分钟的持仓量和持仓价值，逐个合约取（决策 0029）"
+knowable = "统计时刻（timestamp）"
+retention = "接口只保留最近 30 天：不录，接口里就再也拿不到。下载站的 metrics 文件也有持仓量，但 2023 年初还是一天一条，现在多细没有核实，而且只许研究用"
