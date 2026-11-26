@@ -31,3 +31,4 @@
 | [0025](0025-trials-registered-before-they-run.md) | 试验先在仓库登记、所有者合并后才能跑；每张试验卡只跑一次 |
 | [0026](0026-controls-first-stricter-selection.md) | 选第一个确认检验之前先做阳性对照；选择规则收紧；成本按吃单；尽早开始前向计时 |
 | [0027](0027-no-api-recording-forward-from-archives.md) | 不从 Binance 交易接口录数据；前向数据先用公开归档的月度文件；实盘的交易场所和数据到 G7 之前一起定 |
+| [0028](0028-prepare-second-universe.md) | 开始准备第二个研究宇宙：历史长、所有者能合法交易、换手低；首选美国上市的 ETF |
