@@ -26,6 +26,7 @@
 - #20 合并后，所有者手动跑 trial，或者等 01:23 UTC 的定时运行；看日志里 T-0003 的"判定"。
 - 对照"通过"后：开一个只追加两行账本的小 PR，登记 T-0004（A）和 T-0005（B），参数就是 `tests/test_first_candidates.py` 里的 `PLANNED_A`、`PLANNED_B`。
 - 不空等，接着做：Binance 接口条款核对和每日前向录制（决策 0026 第 5 条）；btc-eth 复现通道（等 11 月归档）。
+- 条款核对已开始（2026-11-26）：Vision 数据条款 1.0（2026-08-26 更新）第 2.1 条覆盖"data.binance.vision 及相关端点"，第 4.2 条禁止"实盘自营交易执行"。Binance 文档让公开行情走 `data-api.binance.vision`，它可能算"相关端点"，所以前向录制不用它，改走 U 本位合约的 `fapi.binance.com`（受 Binance 用户条款管）。还没读：Binance 用户条款（binance.com/en/about-legal/terms）里关于接口、自动访问和行情数据的条文；打开这个网页需要所有者批准，下次先做。
 
 ## 2026-11-25 · Claude（Opus 5.5）· G2：横截面引擎和"判定词"（决策 0026）
 

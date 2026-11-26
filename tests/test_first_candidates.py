@@ -3,6 +3,7 @@ markets with an edge, without one, and with nothing but a bid-ask bounce."""
 
 from __future__ import annotations
 
+import json
 import math
 import random
 from datetime import UTC, datetime, timedelta
@@ -76,7 +77,7 @@ def test_funding_paid_during_a_holding_belongs_to_it_and_not_before():
             ],
             "funding_rate": [0.5, 0.001, 0.002, 0.003],
         }
-    )
+    ).with_columns(knowable_time=pl.col("calc_time"), funding_interval_hours=pl.lit(8))
     carry = fc.funding_carry(funding, times).sort("time").to_dicts()
     # 08:00 is paid by whoever held from 00:01; 16:00 by whoever held from 08:01, even
     # though its record came after 16:01; the next day's 00:00 by whoever held from 16:01.
@@ -173,11 +174,17 @@ def test_thirds_take_fresh_contracts_with_enough_volume():
         {"symbol": names, "time": [t] * 8, "price": [1.0] * 8, "fresh": [True] * 6 + [False, True]}
     ).with_columns(pl.col("time").cast(T))
     liq = pl.DataFrame(
-        {"symbol": names, "day": [t] * 8, "liquidity": [6.0, 5, 4, 3, 2, 1, 9, 0.5]}
+        {"symbol": [*names, "J"], "day": [t] * 9, "liquidity": [6.0, 5, 4, 3, 2, 1, 9, 0.5, 7]}
     ).with_columns(pl.col("day").cast(T))
-    thirds = fc.eligible_thirds(prices, liq, min_volume=1.0)
+    spread = pl.DataFrame({"symbol": names, "day": [t] * 8, "half_spread": [0.001] * 8})
+    spread = spread.with_columns(pl.col("day").cast(T))
+    prices = pl.concat(
+        [prices, pl.DataFrame({"symbol": ["J"], "time": [t], "price": [1.0], "fresh": [True]})],
+        how="vertical_relaxed",
+    )
+    thirds = fc.eligible_thirds(prices, liq, spread, min_volume=1.0)
     got = dict(zip(thirds["symbol"], thirds["third"], strict=True))
-    # G has no fresh price, H too little volume: neither is counted.
+    # G has no fresh price, H too little volume, J no spread estimate of its own.
     assert got == {"F": 1, "E": 1, "D": 2, "C": 2, "B": 3, "A": 3}
 
 
@@ -194,6 +201,63 @@ def test_a_contract_without_a_spread_estimate_pays_the_widest_one():
     assert [r["fallback"] for r in costs] == [False, False, True]
     maker = fc.cost_table(spread, prices, fee=0.0002, with_spread=False)
     assert maker["cost_rate"].to_list() == pytest.approx([0.0002] * 3)
+
+
+def test_the_cost_safety_net_never_uses_a_spread_from_the_future():
+    """Nobody has an estimate on 1 January 2020; Q has 0.05 only from 2023. The 2020
+    row must stay without a rate (Gemini's second review), while a 2023 row without its
+    own estimate takes the widest one known by then."""
+    p0, p1 = utc(2020, 1, 1), utc(2023, 1, 1)
+    prices = pl.DataFrame({"symbol": ["P", "P", "Q"], "time": [p0, p1, p1]}).with_columns(
+        pl.col("time").cast(T)
+    )
+    spread = pl.DataFrame({"symbol": ["Q"], "day": [p1], "half_spread": [0.05]}).with_columns(
+        pl.col("day").cast(T)
+    )
+    costs = fc.cost_table(spread, prices, 0.0005, True).sort("time", "symbol").to_dicts()
+    assert costs[0]["cost_rate"] is None and costs[0]["fallback"] is True
+    assert costs[1]["cost_rate"] == pytest.approx(0.0505)  # P in 2023: the widest then
+    assert costs[2]["cost_rate"] == pytest.approx(0.0505) and costs[2]["fallback"] is False
+
+
+def test_a_bad_bar_is_dropped_instead_of_making_the_spread_infinite():
+    """One bar with a low of 0 made 15 of 21 daily estimates infinite, and the run would
+    have crashed on its one chance (Gemini's second review)."""
+    rows = [("S", utc(2021, 1, 1) + h * H, 100.0, 100.5, 99.5, 1.0, 100.0) for h in range(30 * 24)]
+    rows[100] = ("S", rows[100][1], 100.0, 100.5, 0.0, 1.0, 100.0)
+    rows[200] = ("S", rows[200][1], float("nan"), 100.5, 99.5, 1.0, 100.0)
+    bars = frame(rows)
+    assert fc.valid_bars(bars).height == bars.height - 2
+    for est in (fc.half_spread(bars, 20, 10), fc.half_spread(fc.valid_bars(bars), 20, 10)):
+        assert est.height and est["half_spread"].is_finite().all()
+
+
+def test_settlements_are_cleaned_before_use():
+    """A settlement recorded twice is averaged, a NaN rate dropped, a zero or missing
+    interval counted as 8 hours."""
+    at0, at8 = utc(2021, 1, 1), utc(2021, 1, 1, 8)
+    funding = pl.DataFrame(
+        {
+            "symbol": ["F", "F", "F", "G", "G"],
+            "calc_time": [at0, at0, at8, at0, at8],
+            "funding_interval_hours": [8, 8, 0, None, 4],
+            "funding_rate": [0.001, 0.003, 0.002, float("nan"), 0.004],
+        }
+    ).with_columns(pl.col("calc_time").cast(T), knowable_time=pl.col("calc_time").cast(T))
+    s = fc.settlements(funding).sort("symbol", "calc_time").to_dicts()
+    assert [(r["symbol"], r["funding_rate"], r["per_8h"]) for r in s] == [
+        ("F", pytest.approx(0.002), pytest.approx(0.002)),
+        ("F", 0.002, 0.002),
+        ("G", 0.004, 0.008),
+    ]
+    times = [utc(2020, 12, 31, 16, 1), utc(2021, 1, 1, 0, 1)]
+    carry = fc.funding_carry(funding, times).filter(pl.col("symbol") == "F").sort("time")
+    assert carry["carry"].to_list() == pytest.approx([-0.002, -0.002])  # not -0.004
+
+
+def test_every_day_of_nothing_is_nothing():
+    empty = pl.DataFrame(schema={"symbol": pl.String, "day": T, "volume": pl.Float64})
+    assert fc.every_day(empty).is_empty()
 
 
 @pytest.mark.parametrize(
@@ -335,6 +399,7 @@ def test_b_runs_and_a_random_walk_does_not_pass(flat):
         "least_minus_most_gross",
         "taker",
         "maker_reference",
+        "data_issues",
     }
     assert est["taker"]["cost_annual"] > 0
 
@@ -348,6 +413,50 @@ def test_b_is_not_fooled_by_the_bid_ask_bounce(monkeypatch):
     naive = fc.evaluate(klines, None, params).metrics["estimate"]["least_liquid"]
     assert naive["gross_price_only"]["t_stat"] > 3
     assert abs(honest["gross_price_only"]["t_stat"]) < 3
+
+
+@pytest.mark.parametrize("which", ["A", "B"])
+def test_a_whole_run_is_deterministic_and_has_no_nan(flat, which):
+    planned = PLANNED_A if which == "A" else PLANNED_B
+    funding = flat[1] if which == "A" else None
+    one = fc.evaluate(flat[0], funding, synthetic(planned))
+    two = fc.evaluate(flat[0], funding, synthetic(planned))
+    for a, b in ((one.metrics, two.metrics), (one.sections, two.sections)):
+        assert json.dumps(a, sort_keys=True, allow_nan=False) == json.dumps(
+            b, sort_keys=True, allow_nan=False
+        )
+
+
+def test_dirty_data_is_counted_and_survived(flat):
+    """A bad bar, a settlement recorded twice, a NaN rate, a zero interval and contracts
+    with no funding at all: the run goes through and says what it met."""
+    klines, funding = flat
+    bad = klines.with_row_index().with_columns(
+        low=pl.when(pl.col("index") == 1000).then(0.0).otherwise(pl.col("low"))
+    )
+    dirty = pl.concat(
+        [
+            funding.filter(~pl.col("symbol").is_in(["S00USDT", "S01USDT"])),
+            funding.filter(pl.col("symbol") == "S05USDT").head(1),  # recorded twice
+            funding.slice(5, 1).with_columns(funding_rate=pl.lit(float("nan"))),
+            funding.slice(6, 1).with_columns(pl.col("funding_interval_hours") * 0),
+        ]
+    )
+    outcome = fc.evaluate(bad.drop("index"), dirty, synthetic(PLANNED_A))
+    issues = outcome.metrics["estimate"]["data_issues"]
+    assert issues["bars_dropped"] == 1
+    assert issues["settlements_recorded_twice"] >= 1
+    assert issues["funding_rows_dropped"] == 1
+    assert issues["intervals_assumed_8h"] == 1
+    json.dumps(outcome.metrics, allow_nan=False)
+
+
+def test_too_few_periods_give_no_summary_and_fail_instead_of_crashing(flat):
+    tiny = {**synthetic(PLANNED_B), "start": "2023-12-27", "end": "2023-12-30"}
+    outcome = fc.evaluate(flat[0], None, tiny)
+    assert outcome.metrics["estimate"]["taker"] is None
+    assert outcome.verdict == "不通过"
+    assert list(outcome.sections) == list(SECTIONS)
 
 
 def test_an_unknown_candidate_is_an_error(flat):
