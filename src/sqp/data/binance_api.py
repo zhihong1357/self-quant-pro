@@ -140,20 +140,21 @@ class Client:
                 reply = self.get(path, params)
             except OSError:
                 reply = None
+            last = attempt == self.attempts - 1  # no waiting for a request never sent
             if reply is not None:
                 if reply.status == 418:
                     raise Banned(path)
-                if reply.status == 429:
+                if reply.status == 429 and not last:
                     self.sleep(_retry_after(reply))
                     continue
-                if reply.status == 403 and self.waf_pauses > 0:
+                if reply.status == 403 and self.waf_pauses > 0 and not last:
                     self.waf_pauses -= 1
                     self.sleep(WAF_PAUSE)
                     continue
                 if reply.status < 500 and reply.status != 408:
                     self._ease_off(reply)
                     return reply
-            if attempt < self.attempts - 1:
+            if not last:
                 self.sleep(2**attempt)
         raise NotFinal(f"{path} {sorted(params.items())}")
 

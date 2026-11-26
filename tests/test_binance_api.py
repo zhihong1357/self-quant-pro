@@ -340,6 +340,14 @@ def test_a_lasting_403_is_no_answer_and_leaves_the_dataset_whole(tmp_path):
     assert "open-interest-30m" in report.written
 
 
+def test_a_403_on_the_last_try_is_not_waited_out(tmp_path):
+    fake = FakeBinance(NOW, fail={"/futures/data/openInterestHist": [500, 500, 500, 403]})
+    client, clock = client_for(fake)
+    report = api.record(client, LocalStore(tmp_path), now_ms=NOW, limit_bytes=10**12)
+    assert "open-interest-30m" not in report.written
+    assert api.WAF_PAUSE not in clock.slept and client.waf_pauses == api.WAF_PAUSES
+
+
 def test_funding_falls_back_to_one_contract_at_a_time(tmp_path):
     fake = FakeBinance(NOW, funding_needs_symbol=True)
     report = run(tmp_path, fake)
