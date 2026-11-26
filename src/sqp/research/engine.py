@@ -206,10 +206,10 @@ def portfolio_returns(
     weights drifted by their returns; funding is cash, so it changes the account's
     value but not the positions.
 
-    Trades happen at every rebalance time that has a next one (a time in `returns`).
-    Where too few names left no new portfolio, the old one is only closed, and that
-    cost belongs to the period that ends there. The last time ends the sample:
-    positions are marked there, not closed.
+    Trades happen at every rebalance time before the last one. Where too few names (or
+    none, as in an exchange-wide outage) left no new portfolio, the old one is only
+    closed, and that cost belongs to the period that ends there. The last time ends the
+    sample: positions are marked there, not closed.
     """
     _unique(weights, "权重表")
     _unique(returns, "收益表")
@@ -241,6 +241,9 @@ def portfolio_returns(
         .sort("time")
     )
     # Weights just before each rebalance: last period's weights drifted by their returns.
+    wiped = per_time.filter(1 + pl.col("gross") + pl.col("carry") <= 0).height
+    if wiped:
+        raise ValueError(f"有 {wiped} 期把账户亏光了（1 + 收益 ≤ 0），之后的权重无从算起")
     drifted = (
         held.join(per_time.select("time", "gross", pl.col("carry").alias("cash")), on="time")
         # Positions drift with prices; funding is cash: it moves the account's value, by
@@ -254,7 +257,8 @@ def portfolio_returns(
         weights.select("symbol", "time", "weight")
         .join(drifted, on=["symbol", "time"], how="full", coalesce=True)
         .with_columns(pl.col("weight").fill_null(0.0), pl.col("before").fill_null(0.0))
-        .join(returns.select("time").unique(), on="time", how="semi")  # not the last time
+        # Every time before the last: an outage (no fresh price anywhere) is not the end.
+        .filter(pl.col("time") < returns["next_time"].max())
         .with_columns(traded=(pl.col("weight") - pl.col("before")).abs())
         .sort("time", "symbol")
     )
@@ -327,8 +331,9 @@ def long_run_ratio(values: list[float], lags: int) -> float:
 def summarize(periods: pl.DataFrame, *, column: str = "net", periods_per_year: float) -> dict:
     """Annualised mean, volatility and Sharpe; t-statistic with a fat-tail standard
     error; the Sharpe ratios and t-statistic again with an allowance for autocorrelation
-    over at least a week (`_hac`: divided by the square root of long_run_ratio); max
-    drawdown; Sharpe by
+    over at least a week (`_hac`: divided by the square root of long_run_ratio; the
+    last-365-days value reuses the full sample's factor, as a year is too short to
+    estimate it well); max drawdown; Sharpe by
     calendar year and over the last 365 days; how many of 4 equal sub-periods had a
     positive mean; turnover and cost per year."""
     rows = periods.sort("time")
