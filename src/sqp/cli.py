@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import builtins
 import json
+import os
 import secrets
 import sys
 import tomllib
@@ -16,7 +17,7 @@ from pathlib import Path
 
 from sqp import inherit, ledger, stats, storage
 from sqp.checks import run_all
-from sqp.data import build, gen1, profile, vision
+from sqp.data import binance_api, build, gen1, profile, vision
 from sqp.data.pit import AccessRefused, IntegrityError, PointInTime
 from sqp.repo import GitError, Repo
 from sqp.research import run
@@ -123,6 +124,41 @@ def _store_factory(args: argparse.Namespace) -> tuple[Callable[[], storage.Store
     cfg = storage.load_config(Path(args.repo))
     limit = storage.max_bucket_bytes(Path(args.repo))
     return (lambda: storage.GcsStore(cfg["bucket"], cfg["project_id"])), limit
+
+
+def _record_binance(args: argparse.Namespace) -> int:
+    api = binance_api
+    client = api.Client(api.http_get)
+    try:
+        if args.probe:
+            status = api.probe(client)
+            print(f"Binance 合约接口的状态码：{status}（200 表示这里能录）")
+            return 0 if status == 200 else 1
+        factory, limit = _store_factory(args)
+        now_ms = int(datetime.now(UTC).timestamp() * 1000)
+        commit = os.environ.get("SQP_CODE_COMMIT", "")  # set by scripts/recorder/bootstrap.py
+        report = api.record(client, factory(), now_ms=now_ms, limit_bytes=limit, code_commit=commit)
+    except api.Unreachable as exc:
+        print(f"Binance 合约接口没有放行，状态码 {exc}（451 表示这个地区被拒绝）。什么都没写。")
+        return 1
+    except api.Banned:
+        print("Binance 暂时封了这个地址（418），已经停下。等下一次定时运行再试。")
+        return 2
+    except api.NotFinal as exc:
+        print(f"合约列表或快照没取到，这次没有录历史数据：{exc}"[:300])
+        return 1
+    print(f"USDT 永续合约：{report.symbols} 个；请求 {client.requests} 次")
+    print(f"写入：{'、'.join(report.written) or '无'}")
+    if report.nothing_new:
+        print(f"没有新数据：{'、'.join(report.nothing_new)}")
+    if report.refused:
+        print(f"接口明确拒绝、不会再试的请求：{report.refused} 个（例如合约已下架）")
+    print(f"本次写入约 {_mb(report.stored_bytes)}")
+    if report.failed:
+        print(f"没写成、下次重试：{len(report.failed)} 项")
+        for line in report.failed:
+            print(f"  {line}")
+    return 1 if report.failed else 0
 
 
 def _data_sync(args: argparse.Namespace) -> int:
@@ -352,6 +388,16 @@ def main(argv: list[str] | None = None) -> int:
     f.add_argument("--local", help="用这个本机目录，而不是谷歌云存储桶")
     f.add_argument("--cache", help="把读过的月度表缓存在这个本机目录")
     f.set_defaults(func=_data_profile)
+
+    p = sub.add_parser("record", help="录制（决策 0027）")
+    record_sub = p.add_subparsers(dest="record_command", required=True)
+    rb = record_sub.add_parser(
+        "binance-um", help="从 Binance U 本位合约的公开行情接口录数据，原样存进存储（只增不改）"
+    )
+    rb.add_argument("--repo", default=".", help="读哪个仓库的存储配置")
+    rb.add_argument("--local", help="存进这个本机目录，而不是谷歌云存储桶")
+    rb.add_argument("--probe", action="store_true", help="只测这里能不能连上，打印状态码")
+    rb.set_defaults(func=_record_binance)
 
     p = sub.add_parser("trial", help="试验（决策 0025）：先在 main 上登记，再跑")
     trial_sub = p.add_subparsers(dest="trial_command", required=True)
