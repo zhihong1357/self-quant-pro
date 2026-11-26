@@ -34,8 +34,10 @@ contract whose own spread can be estimated is tradable, so every entry pays its 
 There is one run on real data, and a crash counts as a trial: a bar without positive,
 finite prices or a funding record without a finite rate is dropped, a settlement
 recorded twice is averaged, a missing or zero settlement interval counts as 8 hours,
-and too few periods give no summary rather than an error. How much of each was met is
-reported under data_issues.
+and a comparison that is only reported gives no summary when it has too few periods.
+For the portfolio that is judged, too few periods are an error: a run that could not be
+estimated must not look like one that failed the test. How much dirty data was met is
+reported under data_issues and in the report.
 
 The power test (decision 0026): effect = min(half the full-sample annualised net
 Sharpe, the Sharpe over the last 365 days), both corrected for autocorrelation (the
@@ -442,7 +444,10 @@ def evaluate(klines: pl.DataFrame, funding: pl.DataFrame | None, p: dict) -> Out
         result = candidate_b(klines, p)
     else:
         raise ValueError('candidate 只能是 "A" 或 "B"')
-    test = power_test(result["taker"], p)  # None (too few periods) fails
+    if result["taker"] is None:
+        # Loud, not a quiet "不通过": nothing was estimated (Gemini's third review).
+        raise ValueError("被检验的组合不到 4 期，无法估计：多半是数据或参数出了问题")
+    test = power_test(result["taker"], p)
     metrics = {"candidate": p["candidate"], "estimate": result, "power_test": test}
     verdict = "通过" if test["passes"] else "不通过"
     return Outcome(metrics=metrics, sections=sections(metrics, p), verdict=verdict)
@@ -499,6 +504,17 @@ def row(label: str, s: dict) -> str:
     )
 
 
+def dirty(issues: dict) -> str:
+    text = f"遇到的脏数据：丢掉 K 线 {issues['bars_dropped']} 根"
+    if "funding_rows_dropped" in issues:
+        text += (
+            f"、资金费记录 {issues['funding_rows_dropped']} 条；"
+            f"同一次结算记了两次 {issues['settlements_recorded_twice']} 次；"
+            f"结算间隔按 8 小时处理 {issues['intervals_assumed_8h']} 条"
+        )
+    return text + "。"
+
+
 def sections(m: dict, p: dict) -> dict:
     c, est, test = m["candidate"], m["estimate"], m["power_test"]
     taker = est["taker"] or NONE
@@ -550,7 +566,7 @@ def sections(m: dict, p: dict) -> dict:
             + ("和资金费率" if c == "A" else "")
             + f"，组合从 {p['start']} 到 {p['end']}。合约要有新鲜价格，"
             f"前 {p['liquidity_days']} 天日成交额中位数不低于 {p['min_volume']:,} 美元，"
-            f"{who}。已下架的合约按最后的价格出场，留在样本里。"
+            f"{who}。已下架的合约按最后的价格出场，留在样本里。" + dirty(est["data_issues"])
         ),
         "方法": (
             f"{how}分 {p['groups']} 组，做多低的一端、做空高的一端，美元中性，"
