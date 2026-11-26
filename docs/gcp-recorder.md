@@ -1,6 +1,6 @@
 # 开通 Binance 录制任务（谷歌云东京区）
 
-一次性的设置，你要操作约 10 分钟；第一次录制会在后台再跑约 30 分钟。依据是[决策 0027](decisions/0027-api-recording-in-tokyo.md) 和 [0029](decisions/0029-recorder-30-minute-rows.md)。
+一次性的设置，你要操作约 10 分钟；第一次录制会在后台再跑约 40 分钟。依据是[决策 0027](decisions/0027-api-recording-in-tokyo.md) 和 [0029](decisions/0029-recorder-30-minute-rows.md)。
 
 做完以后，每天 UTC 00:17 会有一个小任务在谷歌云的东京区自动运行：从 Binance 的公开行情接口录合约列表、资金费率、30 分钟 K 线和每 30 分钟的持仓量，原样存进你的私有存储桶。它不用 Binance 账号，也不能下单。
 
@@ -39,7 +39,7 @@ Cloud Run 按用量收费。封顶预算到了上限，只暂停 Cloud Run，不
 
 找不到 Spend cap 选项就截图发给智能体。这一步不影响录制。
 
-## 第 3 步（约 30 分钟后）：确认第一次录制成功
+## 第 3 步（约 40 分钟后）：确认第一次录制成功
 
 任选一种：
 

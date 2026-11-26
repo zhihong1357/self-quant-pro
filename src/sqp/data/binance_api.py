@@ -64,13 +64,17 @@ PATHS = frozenset(
     }
 )
 
-# Seconds between two requests of a group, inside Binance's published limits:
-# 2,400 weight a minute in general; funding history 500 requests per 5 minutes;
-# open-interest statistics 1,000 requests per 5 minutes.
-GAPS = {"general": 0.25, "funding": 0.7, "open-interest": 0.35}
+# Seconds between two requests of a group, at half or less of Binance's published limits
+# (2,400 weight a minute in general; funding history 500 requests per 5 minutes;
+# open-interest statistics 1,000 per 5 minutes): Cloud Run's outgoing addresses are
+# shared, and the first run's funding history met Binance's firewall at 0.7 s.
+GAPS = {"general": 0.25, "funding": 2.0, "open-interest": 0.6}
 WEIGHT_HEADER = "x-mbx-used-weight-1m"
 WEIGHT_PAUSE_AT = 1800  # of 2,400: pause for a minute rather than get close
 FUNDING_PAGE = 1000
+FUNDING_SLICE_MS = 4 * HOUR_MS  # each contract settles once in it at most (1-hour ones: 4 times)
+WAF_PAUSE = 360  # a 403 is Binance's firewall, which usually blocks an address for 5 minutes
+WAF_PAUSES = 2  # per run; after that a 403 leaves its dataset to the next run
 _WINDOW_KEY = re.compile(r"/(\d{8}T\d{2}Z)_(\d{8}T\d{2}Z)\.jsonl\.gz$")
 
 
@@ -120,6 +124,7 @@ class Client:
     clock: Callable[[], float] = time.monotonic
     attempts: int = 4
     requests: int = 0
+    waf_pauses: int = WAF_PAUSES
     _last: dict[str, float] = field(default_factory=dict)
 
     def call(self, group: str, path: str, params: dict) -> Reply:
@@ -135,16 +140,21 @@ class Client:
                 reply = self.get(path, params)
             except OSError:
                 reply = None
+            last = attempt == self.attempts - 1  # no waiting for a request never sent
             if reply is not None:
                 if reply.status == 418:
                     raise Banned(path)
-                if reply.status == 429:
+                if reply.status == 429 and not last:
                     self.sleep(_retry_after(reply))
                     continue
-                if reply.status < 500:
+                if reply.status == 403 and self.waf_pauses > 0 and not last:
+                    self.waf_pauses -= 1
+                    self.sleep(WAF_PAUSE)
+                    continue
+                if reply.status < 500 and reply.status != 408:
                     self._ease_off(reply)
                     return reply
-            if attempt < self.attempts - 1:
+            if not last:
                 self.sleep(2**attempt)
         raise NotFinal(f"{path} {sorted(params.items())}")
 
@@ -155,6 +165,12 @@ class Client:
             return
         if used >= WEIGHT_PAUSE_AT:
             self.sleep(60)
+
+
+def _status(status: int) -> str:
+    if status == 403:
+        return "403（Binance 的防火墙拦下了，多半是这个地址的请求太密；下次运行再录）"
+    return str(status)
 
 
 def _retry_after(reply: Reply) -> float:
@@ -284,9 +300,11 @@ def fetch_per_symbol(
                 params |= {"endTime": piece.end, "limit": page}
                 reply = client.call(group, path, params)
                 lines.append(_line(path, params, reply, now()))
-                if reply.status != 200:
+                if reply.status == 400:  # a final answer, such as a delisted contract
                     answered = False
                     break
+                if reply.status != 200:  # a 403 says nothing about this contract
+                    raise NotFinal(f"{path} {symbol}：{_status(reply.status)}")
                 rows = json.loads(reply.body)
                 if len(rows) < page:
                     break
@@ -306,12 +324,12 @@ def fetch_funding(
     symbols: list[str],
     now: Callable[[], str] = _now_text,
 ) -> tuple[Lines, int]:
-    """Funding settlements of every contract, one hour at a time; an hour that fills a
+    """Funding settlements of every contract, four hours at a time; a slice that fills a
     whole page is halved until it does not. If the API wants a symbol, ask per symbol."""
     path, lines = "/fapi/v1/fundingRate", Lines()
     todo = [
-        (start, min(start + HOUR_MS - 1, window.end))
-        for start in range(window.start, window.end + 1, HOUR_MS)
+        (start, min(start + FUNDING_SLICE_MS - 1, window.end))
+        for start in range(window.start, window.end + 1, FUNDING_SLICE_MS)
     ]
     todo.reverse()
     while todo:
@@ -324,7 +342,7 @@ def fetch_funding(
                 client, "funding", path, {}, pieces, symbols, _funding_time, now
             )
         if reply.status != 200:
-            raise NotFinal(f"{path} {params}：{reply.status}")
+            raise NotFinal(f"{path} {params}：{_status(reply.status)}")
         if len(json.loads(reply.body)) >= FUNDING_PAGE:
             if start == end:
                 raise NotFinal(f"{path}：同一毫秒的结算超过 {FUNDING_PAGE} 条")

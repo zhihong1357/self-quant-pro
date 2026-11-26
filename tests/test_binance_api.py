@@ -311,6 +311,43 @@ def test_a_refused_region_writes_nothing(tmp_path):
     assert LocalStore(tmp_path).keys() == []
 
 
+def test_funding_is_asked_four_hours_at_a_time(tmp_path):
+    fake = FakeBinance(NOW)
+    run(tmp_path, fake)
+    asked = [p for path, p in fake.calls if path == "/fapi/v1/fundingRate"]
+    assert len(asked) == 29 * 6  # not one request an hour
+    assert {p["endTime"] + 1 - p["startTime"] for p in asked} == {4 * H}
+
+
+def test_a_firewall_403_is_waited_out_once_then_asked_again(tmp_path):
+    fake = FakeBinance(NOW, fail={"/futures/data/openInterestHist": [403]})
+    client, clock = client_for(fake)
+    report = api.record(client, LocalStore(tmp_path), now_ms=NOW, limit_bytes=10**12)
+    assert "open-interest-30m" in report.written and report.refused == 0
+    assert clock.slept.count(api.WAF_PAUSE) == 1
+
+
+def test_a_lasting_403_is_no_answer_and_leaves_the_dataset_whole(tmp_path):
+    # A 403 says nothing about the contract: kept as a refusal, it would leave a hole in a
+    # window the manifest calls covered, and open interest cannot be fetched again later.
+    fake = FakeBinance(NOW, fail={"/futures/data/openInterestHist": [403] * 3})
+    client, clock = client_for(fake)
+    report = api.record(client, LocalStore(tmp_path), now_ms=NOW, limit_bytes=10**12)
+    assert "open-interest-30m" not in report.written and report.refused == 0
+    assert any(f.startswith("open-interest-30m") and "防火墙" in f for f in report.failed)
+    assert clock.slept.count(api.WAF_PAUSE) == api.WAF_PAUSES
+    report = run(tmp_path, FakeBinance(NOW + DAY), now=NOW + DAY)  # the next run records it
+    assert "open-interest-30m" in report.written
+
+
+def test_a_403_on_the_last_try_is_not_waited_out(tmp_path):
+    fake = FakeBinance(NOW, fail={"/futures/data/openInterestHist": [500, 500, 500, 403]})
+    client, clock = client_for(fake)
+    report = api.record(client, LocalStore(tmp_path), now_ms=NOW, limit_bytes=10**12)
+    assert "open-interest-30m" not in report.written
+    assert api.WAF_PAUSE not in clock.slept and client.waf_pauses == api.WAF_PAUSES
+
+
 def test_funding_falls_back_to_one_contract_at_a_time(tmp_path):
     fake = FakeBinance(NOW, funding_needs_symbol=True)
     report = run(tmp_path, fake)
