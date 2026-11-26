@@ -213,6 +213,35 @@ def test_closing_at_a_time_with_too_few_names_is_charged_to_the_period_before():
     assert second["net"] == pytest.approx(-0.001)
 
 
+def test_an_exchange_wide_outage_still_charges_the_close_out():
+    """At hour 1 nothing has a fresh price, so `returns` has no row for it at all; the
+    first portfolio is still closed there and pays for it (Gemini's second review)."""
+    weights = pl.DataFrame(
+        {"symbol": ["X", "Y"] * 2, "time": [at(0)] * 2 + [at(2)] * 2, "weight": [0.5, -0.5] * 2}
+    )
+    returns = pl.DataFrame(
+        {
+            "symbol": ["X", "Y"] * 2,
+            "time": [at(0)] * 2 + [at(2)] * 2,
+            "next_time": [at(1)] * 2 + [at(3)] * 2,
+            "ret": [0.10, -0.10, 0.0, 0.0],
+        }
+    )
+    first, second = engine.portfolio_returns(weights, returns, cost_rate=0.001).to_dicts()
+    closing = 0.5 * 1.1 / 1.1 + 0.5 * 0.9 / 1.1
+    assert first["turnover"] == pytest.approx(1.0 + closing)
+    assert second["turnover"] == pytest.approx(1.0)  # nothing charged at the last time
+
+
+def test_a_period_that_wipes_out_the_account_is_an_error():
+    weights = pl.DataFrame({"symbol": ["X", "Y"], "time": [at(0)] * 2, "weight": [0.5, -0.5]})
+    returns = pl.DataFrame(
+        {"symbol": ["X", "Y"], "time": [at(0)] * 2, "next_time": [at(1)] * 2, "ret": [-1.0, 1.0]}
+    )
+    with pytest.raises(ValueError, match="亏光"):
+        engine.portfolio_returns(weights, returns)
+
+
 def test_a_cost_table_charges_each_contract_its_own_rate():
     """Y is replaced by Z at hour 1: Y's exit pays Y's rate, Z's entry Z's."""
     weights = pl.DataFrame(
