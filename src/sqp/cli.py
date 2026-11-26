@@ -151,6 +151,8 @@ def _record_binance(args: argparse.Namespace) -> int:
     print(f"写入：{'、'.join(report.written) or '无'}")
     if report.nothing_new:
         print(f"没有新数据：{'、'.join(report.nothing_new)}")
+    if report.healed:
+        print(f"补写了上次没写成的清单：{'、'.join(report.healed)}")
     if report.refused:
         print(f"接口明确拒绝、不会再试的请求：{report.refused} 个（例如合约已下架）")
     print(f"本次写入约 {_mb(report.stored_bytes)}")

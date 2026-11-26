@@ -7,8 +7,10 @@ market-data paths in `PATHS` are called, with no account and no key: nothing her
 trade or move anything (rule 1).
 
 What is kept: each response as it came, gzip'd JSON lines, one object per dataset per
-run under raw/binance-api/um/<dataset>/, and a manifest per object naming the window it
-covers, its request count and its SHA-256. Objects are create-only.
+run under raw/binance-api/um/<dataset>/, and a manifest per object (same name under
+manifests/binance-api/um/) naming the window it covers and its SHA-256. Objects are
+create-only. A write that fails is reported, never fatal: the other datasets go on; an
+object whose manifest did not get written is given one by the next run.
 
 A dataset is written only when every one of its requests got a final answer: a 200, or
 a 4xx that no retry can change (an unknown symbol, say). Anything that might succeed
@@ -324,7 +326,7 @@ HISTORIES = (
 
 def klines_page(window: Window) -> int:
     """Binance weighs a klines request by its limit: under 100 costs 1, under 500 costs 2."""
-    return 99 if window.hours <= 99 else 499
+    return 99 if window.hours < 99 else 499  # a window of exactly 99 would ask for an empty page
 
 
 @dataclass
@@ -332,6 +334,7 @@ class Report:
     written: list[str] = field(default_factory=list)
     nothing_new: list[str] = field(default_factory=list)
     failed: list[str] = field(default_factory=list)
+    healed: list[str] = field(default_factory=list)
     refused: int = 0
     symbols: int = 0
     stored_bytes: int = 0
@@ -346,6 +349,7 @@ class Writer:
     limit_bytes: int
     total_bytes: int
     code_commit: str = ""
+    sleep: Callable[[float], None] = time.sleep
 
     def write(self, dataset: str, key: str, lines: list[dict], extra: dict, report: Report) -> None:
         text = "".join(
@@ -360,6 +364,9 @@ class Writer:
         except ObjectExists:
             report.nothing_new.append(dataset)
             return
+        except Exception as exc:  # the next run asks for the same window again
+            report.failed.append(f"{dataset}：写入失败（{type(exc).__name__}），下次重录")
+            return
         manifest = {
             "key": key,
             "dataset": dataset,
@@ -373,10 +380,60 @@ class Writer:
             **extra,
         }
         body = json.dumps(manifest, sort_keys=True).encode()
-        self.store.put(f"{MANIFEST_PREFIX}{self.run}-{dataset}.json", body)
         self.total_bytes += len(data) + len(body)
         report.written.append(dataset)
         report.stored_bytes += len(data)
+        if not self.put_manifest(manifest_key(key), body):
+            report.failed.append(f"{dataset}：清单没写成，下次运行会补上")
+
+    def put_manifest(self, key: str, body: bytes, attempts: int = 3) -> bool:
+        for attempt in range(attempts):
+            try:
+                self.store.put(key, body)
+                return True
+            except ObjectExists:
+                return True
+            except Exception:
+                if attempt < attempts - 1:
+                    self.sleep(2**attempt)
+        return False
+
+
+def manifest_key(raw_key: str) -> str:
+    """The manifest of a raw object: the same name under the manifest prefix."""
+    if not raw_key.startswith(RAW_PREFIX) or not raw_key.endswith(".jsonl.gz"):
+        raise ValueError(f"不是录制的原始对象：{raw_key}")
+    return MANIFEST_PREFIX + raw_key[len(RAW_PREFIX) : -len(".jsonl.gz")] + ".json"
+
+
+def heal(store: Store, raw_keys: list[str], writer: Writer, report: Report) -> None:
+    """Write the manifest an earlier run could not: hashed from the stored object."""
+    have = set(store.keys(MANIFEST_PREFIX))
+    for key in raw_keys:
+        if not key.endswith(".jsonl.gz") or manifest_key(key) in have:
+            continue
+        dataset = key[len(RAW_PREFIX) :].split("/", 1)[0]
+        try:
+            data = store.get(key)
+            lines = gzip.decompress(data).count(b"\n")
+        except Exception as exc:
+            report.failed.append(f"{dataset}：补写清单时读不到原始对象（{type(exc).__name__}）")
+            continue
+        manifest = {
+            "key": key,
+            "dataset": dataset,
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "bytes": len(data),
+            "lines": lines,
+            "source": BASE,
+            "healed_at": _now_text(),
+            "healed_by_run": writer.run,
+        }
+        body = json.dumps(manifest, sort_keys=True).encode()
+        if writer.put_manifest(manifest_key(key), body):
+            report.healed.append(dataset)
+        else:
+            report.failed.append(f"{dataset}：清单还是没写成，下次运行再补")
 
 
 def record(
@@ -391,6 +448,7 @@ def record(
     run = stamp(now_ms, "%Y%m%dT%H%M%SZ")
     keys = store.keys(RAW_PREFIX)
     writer = Writer(store, run, limit_bytes, sum(store.sizes().values()), code_commit)
+    heal(store, keys, writer, report)
 
     snapshots = {}
     for dataset, path in (

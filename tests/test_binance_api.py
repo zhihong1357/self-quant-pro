@@ -160,7 +160,10 @@ def test_every_object_has_a_manifest_with_its_sha256(tmp_path):
         m = json.loads(store.get(key))
         assert hashlib.sha256(store.get(m["key"])).hexdigest() == m["sha256"]
         assert m["source"] == api.BASE
-    klines = next(json.loads(store.get(k)) for k in manifests if k.endswith("klines-1h.json"))
+    klines = next(
+        m for m in map(json.loads, map(store.get, manifests)) if m["dataset"] == "klines-1h"
+    )
+    assert {api.manifest_key(json.loads(store.get(k))["key"]) for k in manifests} == set(manifests)
     assert klines["window"]["end"] - klines["window"]["start"] + 1 == 29 * DAY
 
 
@@ -334,8 +337,8 @@ def test_window_helpers():
     ]
     end = int(datetime(2026, 12, 1, 23, tzinfo=UTC).timestamp() * 1000) - 1
     assert api.covered_until(keys) == {"klines-1h": end}
-    assert api.klines_page(api.Window(0, 99 * H - 1)) == 99
-    assert api.klines_page(api.Window(0, 100 * H - 1)) == 499
+    assert api.klines_page(api.Window(0, 98 * H - 1)) == 99
+    assert api.klines_page(api.Window(0, 99 * H - 1)) == 499  # 99 would page once for nothing
 
 
 def test_the_manifest_names_the_code_that_ran(tmp_path):
@@ -363,37 +366,148 @@ def test_the_cloud_run_bootstrap_needs_only_the_standard_library():
     assert names - {"__future__"} <= set(sys.stdlib_module_names)
 
 
-@pytest.mark.parametrize("probe", [False, True])
-def test_the_bootstrap_runs_one_fixed_commit_with_locked_dependencies(tmp_path, monkeypatch, probe):
+def _bootstrap():
     import importlib.util
-    import io
-    import zipfile
     from pathlib import Path
 
     path = Path(__file__).resolve().parents[1] / "scripts/recorder/bootstrap.py"
     spec = importlib.util.spec_from_file_location("bootstrap", path)
     boot = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(boot)
-    sha = "0123456789abcdef" * 2 + "01234567"
+    return boot
+
+
+def _archive(comment: bytes) -> bytes:
+    import io
+    import zipfile
+
     bundle = io.BytesIO()
     with zipfile.ZipFile(bundle, "w") as z:
-        z.writestr(f"self-quant-pro-{sha}/pyproject.toml", "")
-    fetched = []
+        z.writestr("self-quant-pro-main/pyproject.toml", "")
+        z.comment = comment
+    return bundle.getvalue()
 
-    def get(url, timeout=120):
+
+SHA = "0123456789abcdef" * 2 + "01234567"
+
+
+@pytest.mark.parametrize("probe", [False, True])
+def test_the_bootstrap_runs_the_commit_its_archive_names(tmp_path, monkeypatch, probe):
+    """GitHub's zip of main carries the commit as its comment (checked on the live
+    archive, 2026-11-26): no anonymous API call, no race between commit and download."""
+    boot = _bootstrap()
+    fetched, ran = [], []
+
+    def get(url, timeout=120, attempts=3):
         fetched.append(url)
-        return json.dumps({"sha": sha}).encode() if "api.github.com" in url else bundle.getvalue()
+        return _archive(SHA.encode())
 
-    ran = []
     monkeypatch.setattr(boot, "_get", get)
     monkeypatch.setattr(boot.subprocess, "run", lambda cmd, check: ran.append(cmd))
     monkeypatch.setattr(boot.subprocess, "call", lambda cmd, env: ran.append((cmd, env)) or 0)
     monkeypatch.setattr(boot.tempfile, "mkdtemp", lambda prefix: str(tmp_path))
     monkeypatch.setenv("SQP_PROBE", "1" if probe else "0")
     assert boot.main() == 0
-    assert fetched[1] == f"https://codeload.github.com/zhihong1357/self-quant-pro/zip/{sha}"
+    assert fetched == ["https://codeload.github.com/zhihong1357/self-quant-pro/zip/refs/heads/main"]
     assert ran[0][-1] == f"uv=={boot.UV}"
     command, env = ran[1]
     assert command[:4] == ["uv", "run", "--locked", "--no-dev"]
+    assert command[command.index("--directory") + 1] == str(tmp_path / "self-quant-pro-main")
     assert ("--probe" in command) is probe
-    assert env["SQP_CODE_COMMIT"] == sha
+    assert env["SQP_CODE_COMMIT"] == SHA
+
+
+def test_without_a_comment_the_bootstrap_asks_the_api_and_never_fails_on_it(monkeypatch):
+    import io
+    import zipfile
+
+    boot = _bootstrap()
+    bundle = zipfile.ZipFile(io.BytesIO(_archive(b"")))
+    monkeypatch.setattr(
+        boot, "_get", lambda url, timeout=120, attempts=3: json.dumps({"sha": SHA}).encode()
+    )
+    assert boot.commit_of(bundle) == SHA
+
+    def limited(url, timeout=120, attempts=3):
+        raise OSError("403 rate limit exceeded")
+
+    monkeypatch.setattr(boot, "_get", limited)
+    assert boot.commit_of(bundle) == "unknown"  # the run goes on; the manifest says so
+
+
+def test_bootstrap_downloads_are_retried_with_spaced_waits(monkeypatch):
+    boot = _bootstrap()
+    calls, waits = [], []
+
+    class Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self):
+            return b"ok"
+
+    def urlopen(request, timeout):
+        calls.append(request.full_url)
+        if len(calls) < 3:
+            raise ConnectionResetError("reset")
+        return Resp()
+
+    monkeypatch.setattr(boot.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(boot.time, "sleep", waits.append)
+    assert boot._get("https://codeload.github.com/x") == b"ok"
+    assert waits == [15, 30]
+
+
+class FlakyStore(LocalStore):
+    """A local store whose puts fail, for the chosen keys, a set number of times."""
+
+    def __init__(self, root, fails_on, times=10**9) -> None:
+        super().__init__(root)
+        self.fails_on, self.left = fails_on, times
+
+    def put(self, key, data, content_type=None):
+        if self.fails_on(key) and self.left > 0:
+            self.left -= 1
+            raise ConnectionError("503 from the bucket")
+        return super().put(key, data, content_type=content_type)
+
+
+def test_a_failing_object_write_is_reported_and_does_not_stop_the_rest(tmp_path):
+    client, _ = client_for(FakeBinance(NOW))
+    store = FlakyStore(tmp_path, lambda key: "/klines-1h/" in key and key.startswith("raw/"))
+    report = api.record(client, store, now_ms=NOW, limit_bytes=10**12)
+    assert "klines-1h" not in report.written and "open-interest-1h" in report.written
+    assert any(f.startswith("klines-1h：写入失败") for f in report.failed)
+    report = run(tmp_path, FakeBinance(NOW + DAY), now=NOW + DAY)  # the next run records it
+    assert "klines-1h" in report.written
+
+
+def test_a_manifest_that_could_not_be_written_is_written_by_the_next_run(tmp_path):
+    client, _ = client_for(FakeBinance(NOW))
+    store = FlakyStore(tmp_path, lambda key: key.startswith(api.MANIFEST_PREFIX + "funding/"))
+    writer_sleeps = []
+    original = api.Writer.__init__
+
+    def quick(self, *args, **kwargs):
+        original(self, *args, **kwargs)
+        self.sleep = writer_sleeps.append
+
+    api.Writer.__init__ = quick
+    try:
+        report = api.record(client, store, now_ms=NOW, limit_bytes=10**12)
+    finally:
+        api.Writer.__init__ = original
+    assert "funding" in report.written  # the data is in; only its manifest is missing
+    assert any(f.startswith("funding：清单没写成") for f in report.failed)
+    assert writer_sleeps == [1, 2]  # three tries
+    (raw,) = history_keys(LocalStore(tmp_path), "funding")
+    assert not LocalStore(tmp_path).exists(api.manifest_key(raw))
+
+    report = run(tmp_path, FakeBinance(NOW + 60_000), now=NOW + 60_000)
+    assert report.healed == ["funding"] and report.failed == []
+    healed = json.loads(LocalStore(tmp_path).get(api.manifest_key(raw)))
+    assert healed["sha256"] == hashlib.sha256(LocalStore(tmp_path).get(raw)).hexdigest()
+    assert healed["lines"] == len(lines(LocalStore(tmp_path), raw))
