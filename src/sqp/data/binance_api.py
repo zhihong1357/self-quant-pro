@@ -310,23 +310,36 @@ class History:
     path: str
     fixed: dict
     time_of: Callable[[object], int]
+    per_hour: int  # rows per hour: 2 for 30-minute bars
+    page: int | None = None  # None: sized by Binance's klines weight steps
 
 
+# 30-minute rows (decision 0029): two make an hour, and open interest is kept only a month.
 HISTORIES = (
-    History("klines-1h", "general", "/fapi/v1/klines", {"interval": "1h"}, lambda r: int(r[0])),
     History(
-        "open-interest-1h",
+        "klines-30m",
+        "general",
+        "/fapi/v1/klines",
+        {"interval": "30m"},
+        lambda r: int(r[0]),
+        per_hour=2,
+    ),
+    History(
+        "open-interest-30m",
         "open-interest",
         "/futures/data/openInterestHist",
-        {"period": "1h"},
+        {"period": "30m"},
         lambda r: int(r["timestamp"]),
+        per_hour=2,
+        page=500,
     ),
 )
 
 
-def klines_page(window: Window) -> int:
-    """Binance weighs a klines request by its limit: under 100 costs 1, under 500 costs 2."""
-    return 99 if window.hours < 99 else 499  # a window of exactly 99 would ask for an empty page
+def klines_page(rows: int) -> int:
+    """Binance weighs a klines request by its limit: under 100 costs 1, under 500 costs 2.
+    Exactly 99 rows would fill a page of 99 and then ask once more for nothing."""
+    return 99 if rows < 99 else 499
 
 
 @dataclass
@@ -338,6 +351,7 @@ class Report:
     refused: int = 0
     symbols: int = 0
     stored_bytes: int = 0
+    bucket_bytes: int = 0  # the whole store after this run, for the log
 
 
 @dataclass
@@ -380,10 +394,12 @@ class Writer:
             **extra,
         }
         body = json.dumps(manifest, sort_keys=True).encode()
-        self.total_bytes += len(data) + len(body)
+        self.total_bytes += len(data)
         report.written.append(dataset)
         report.stored_bytes += len(data)
-        if not self.put_manifest(manifest_key(key), body):
+        if self.put_manifest(manifest_key(key), body):
+            self.total_bytes += len(body)
+        else:
             report.failed.append(f"{dataset}：清单没写成，下次运行会补上")
 
     def put_manifest(self, key: str, body: bytes, attempts: int = 3) -> bool:
@@ -429,8 +445,13 @@ def heal(store: Store, raw_keys: list[str], writer: Writer, report: Report) -> N
             "healed_at": _now_text(),
             "healed_by_run": writer.run,
         }
+        match = _WINDOW_KEY.search(key)
+        if match:  # history objects: the same window field a written manifest has
+            start, end = (_from_stamp(g) for g in match.groups())
+            manifest["window"] = {"start": start, "end": end - 1}
         body = json.dumps(manifest, sort_keys=True).encode()
         if writer.put_manifest(manifest_key(key), body):
+            writer.total_bytes += len(body)
             report.healed.append(dataset)
         else:
             report.failed.append(f"{dataset}：清单还是没写成，下次运行再补")
@@ -471,10 +492,9 @@ def record(
         ("funding", lambda w: fetch_funding(client, w, symbols)),
     ]
     for h in HISTORIES:
-        page = 500 if h.name == "open-interest-1h" else None
 
-        def fetch(w: Window, h: History = h, page: int | None = page):
-            size = page or klines_page(w)
+        def fetch(w: Window, h: History = h):
+            size = h.page or klines_page(w.hours * h.per_hour)
             return fetch_per_symbol(client, h.group, h.path, h.fixed, w, symbols, size, h.time_of)
 
         plans.append((h.name, fetch))
@@ -493,4 +513,5 @@ def record(
         extra = {"window": {"start": window.start, "end": window.end}, "symbols": len(symbols)}
         writer.write(dataset, key, lines, extra | {"refused": refused}, report)
         report.refused += refused
+    report.bucket_bytes = writer.total_bytes
     return report

@@ -1,8 +1,8 @@
 # 开通 Binance 录制任务（谷歌云东京区）
 
-一次性的设置，你要操作约 10 分钟；第一次录制会在后台再跑约 30 分钟。依据是[决策 0027](decisions/0027-api-recording-in-tokyo.md)。
+一次性的设置，你要操作约 10 分钟；第一次录制会在后台再跑约 30 分钟。依据是[决策 0027](decisions/0027-api-recording-in-tokyo.md) 和 [0029](decisions/0029-recorder-30-minute-rows.md)。
 
-做完以后，每天 UTC 00:17 会有一个小任务在谷歌云的东京区自动运行：从 Binance 的公开行情接口录合约列表、资金费率、1 小时 K 线和持仓量，原样存进你的私有存储桶。它不用 Binance 账号，也不能下单。
+做完以后，每天 UTC 00:17 会有一个小任务在谷歌云的东京区自动运行：从 Binance 的公开行情接口录合约列表、资金费率、30 分钟 K 线和每 30 分钟的持仓量，原样存进你的私有存储桶。它不用 Binance 账号，也不能下单。
 
 界面上的按钮名称可能和这里略有出入。卡住了就截图发给智能体。
 
@@ -43,7 +43,7 @@ Cloud Run 按用量收费。封顶预算到了上限，只暂停 Cloud Run，不
 
 任选一种：
 
-- 回到 Cloud Shell，运行 `bash sqp-recorder.sh self-quant-pro logs`。最后几行有"写入：exchange-info、premium-index、funding、klines-1h、open-interest-1h"，就是成功了。
+- 回到 Cloud Shell，运行 `bash sqp-recorder.sh self-quant-pro logs`。最后几行有"写入：exchange-info、premium-index、funding、klines-30m、open-interest-30m"，就是成功了。
 - 或者打开 console.cloud.google.com/run/jobs → 点 `binance-recorder`：执行记录最新一行是绿色对勾，就是成功了。
 
 然后告诉智能体"录制成功"，或者把日志截图发过去。
@@ -53,6 +53,7 @@ Cloud Run 按用量收费。封顶预算到了上限，只暂停 Cloud Run，不
 - 每天自动运行，不用管。哪天失败了，第二天会把缺的时间段一起补上（持仓量最多补一个月）。
 - 想暂停：console.cloud.google.com/cloudscheduler → `binance-recorder-daily` → **Pause**；恢复点 **Resume**。
 - 想看日志：在 Cloud Shell 里运行 `bash sqp-recorder.sh self-quant-pro logs`。脚本文件不在了，就重新运行第 1 步那行命令。
+- 日志里有一行"存储桶已用约……，上限……"。用到 4,000 MB 左右就告诉智能体：要写一份决策提高上限（预计 2027 年才会到）。
 
 ## 脚本做了什么
 

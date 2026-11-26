@@ -15,6 +15,7 @@ from sqp.storage import LocalStore
 
 H = api.HOUR_MS
 DAY = api.DAY_MS
+STEPS = {"30m": H // 2, "1h": H}
 NOW = int(datetime(2026, 12, 1, 0, 17, tzinfo=UTC).timestamp() * 1000)
 
 
@@ -70,15 +71,17 @@ class FakeBinance:
         if path == "/fapi/v1/klines":
             if params["symbol"] == self.refuse:
                 return api.Reply(400, b'{"code":-1121,"msg":"Invalid symbol."}', {})
-            first = -(-start // H) * H
-            bars = [[t, "1", "1", "1", "1", "9", t + H - 1] for t in range(first, end + 1, H)]
+            step = STEPS[params["interval"]]
+            first = -(-start // step) * step
+            bars = [[t, "1", "1", "1", "1", "9", t + step - 1] for t in range(first, end + 1, step)]
             return ok(bars[:limit], self.headers)
         if path == "/futures/data/openInterestHist":
+            step = STEPS[params["period"]]
             oldest = self.now_ms - 30 * DAY
-            first = -(-max(start, oldest) // H) * H
+            first = -(-max(start, oldest) // step) * step
             rows = [
                 {"symbol": params["symbol"], "sumOpenInterest": "5", "timestamp": t}
-                for t in range(first, end + 1, H)
+                for t in range(first, end + 1, step)
             ]
             return ok(rows[:limit])
         assert path == "/fapi/v1/fundingRate"
@@ -138,12 +141,13 @@ def test_the_first_run_takes_two_snapshots_and_29_days_of_history(tmp_path):
         "exchange-info",
         "premium-index",
         "funding",
-        "klines-1h",
-        "open-interest-1h",
+        "klines-30m",
+        "open-interest-30m",
     ]
     assert report.failed == [] and report.refused == 0 and report.symbols == 2
+    assert report.bucket_bytes == sum(store.sizes().values())  # data and manifests
     # 00:17 UTC: the last whole hour that ended an hour ago ends at 23:00 the day before.
-    for dataset in ("funding", "klines-1h", "open-interest-1h"):
+    for dataset in ("funding", "klines-30m", "open-interest-30m"):
         assert [k.rsplit("/", 1)[1] for k in history_keys(store, dataset)] == [
             "20261101T23Z_20261130T23Z.jsonl.gz"
         ]
@@ -161,7 +165,7 @@ def test_every_object_has_a_manifest_with_its_sha256(tmp_path):
         assert hashlib.sha256(store.get(m["key"])).hexdigest() == m["sha256"]
         assert m["source"] == api.BASE
     klines = next(
-        m for m in map(json.loads, map(store.get, manifests)) if m["dataset"] == "klines-1h"
+        m for m in map(json.loads, map(store.get, manifests)) if m["dataset"] == "klines-30m"
     )
     assert {api.manifest_key(json.loads(store.get(k))["key"]) for k in manifests} == set(manifests)
     assert klines["window"]["end"] - klines["window"]["start"] + 1 == 29 * DAY
@@ -173,7 +177,7 @@ def test_the_next_run_continues_exactly_where_the_last_stopped(tmp_path):
     report = run(tmp_path, FakeBinance(later), now=later)
     assert report.failed == []
     store = LocalStore(tmp_path)
-    for dataset in ("funding", "klines-1h", "open-interest-1h"):
+    for dataset in ("funding", "klines-30m", "open-interest-30m"):
         names = [k.rsplit("/", 1)[1] for k in history_keys(store, dataset)]
         assert names == [
             "20261101T23Z_20261130T23Z.jsonl.gz",
@@ -181,30 +185,31 @@ def test_the_next_run_continues_exactly_where_the_last_stopped(tmp_path):
         ]
     bars = [
         bar[0]
-        for key in history_keys(store, "klines-1h")
+        for key in history_keys(store, "klines-30m")
         for line in lines(store, key)
         if line["params"]["symbol"] == "AAAUSDT"
         for bar in json.loads(line["body"])
     ]
-    assert bars == sorted(set(bars)) and len(bars) == 30 * 24  # no hour twice, none missing
+    assert bars == sorted(set(bars)) and len(bars) == 30 * 48  # no bar twice, none missing
+    assert {b % (H // 2) for b in bars} == {0}  # every bar on the half hour
 
 
 def test_within_the_same_hour_there_is_nothing_new_to_record(tmp_path):
     run(tmp_path, FakeBinance(NOW))
     report = run(tmp_path, FakeBinance(NOW + 60_000), now=NOW + 60_000)
-    assert report.nothing_new == ["funding", "klines-1h", "open-interest-1h"]
+    assert report.nothing_new == ["funding", "klines-30m", "open-interest-30m"]
     assert report.written == ["exchange-info", "premium-index"]  # a snapshot per run
 
 
 def test_a_dataset_failing_for_now_is_left_whole_for_the_next_run(tmp_path):
     report = run(tmp_path, FakeBinance(NOW, fail={"/fapi/v1/klines": [503] * 4}))
-    assert "klines-1h" not in report.written
-    assert [f.split("：")[0] for f in report.failed] == ["klines-1h"]
-    assert "open-interest-1h" in report.written  # the others are not held back
+    assert "klines-30m" not in report.written
+    assert [f.split("：")[0] for f in report.failed] == ["klines-30m"]
+    assert "open-interest-30m" in report.written  # the others are not held back
     store = LocalStore(tmp_path)
-    assert history_keys(store, "klines-1h") == []
+    assert history_keys(store, "klines-30m") == []
     report = run(tmp_path, FakeBinance(NOW + DAY), now=NOW + DAY)
-    assert [k.rsplit("/", 1)[1] for k in history_keys(store, "klines-1h")] == [
+    assert [k.rsplit("/", 1)[1] for k in history_keys(store, "klines-30m")] == [
         "20261102T23Z_20261201T23Z.jsonl.gz"  # as far back as it may still reach
     ]
 
@@ -217,9 +222,9 @@ def test_network_errors_and_5xx_are_retried(tmp_path):
 
 def test_a_refused_symbol_is_kept_as_an_answer_and_does_not_block(tmp_path):
     report = run(tmp_path, FakeBinance(NOW, refuse="BBBUSDT"))
-    assert "klines-1h" in report.written and report.refused == 1
+    assert "klines-30m" in report.written and report.refused == 1
     store = LocalStore(tmp_path)
-    (key,) = history_keys(store, "klines-1h")
+    (key,) = history_keys(store, "klines-30m")
     refused = [line for line in lines(store, key) if line["status"] != 200]
     assert [(r["status"], r["params"]["symbol"]) for r in refused] == [(400, "BBBUSDT")]
 
@@ -229,7 +234,7 @@ def test_a_ban_stops_the_run_at_once(tmp_path):
     with pytest.raises(api.Banned):
         run(tmp_path, fake)
     store = LocalStore(tmp_path)
-    assert history_keys(store, "klines-1h") == history_keys(store, "open-interest-1h") == []
+    assert history_keys(store, "klines-30m") == history_keys(store, "open-interest-30m") == []
     assert not any(path == "/futures/data/openInterestHist" for path, _ in fake.calls)
 
 
@@ -281,7 +286,7 @@ def test_more_than_a_page_in_one_millisecond_is_not_guessed_at(tmp_path):
     report = run(tmp_path, FakeBinance(NOW, crowd=[(1500, 0)]))
     assert "funding" not in report.written
     assert report.failed and report.failed[0].startswith("funding")
-    assert "klines-1h" in report.written
+    assert "klines-30m" in report.written
 
 
 def test_the_bucket_limit_is_respected(tmp_path):
@@ -331,14 +336,16 @@ def test_only_public_market_data_paths_can_be_called():
 def test_window_helpers():
     assert api.last_hour_end(NOW) == int(datetime(2026, 12, 1, tzinfo=UTC).timestamp() * 1000) - 1
     keys = [
-        f"{api.RAW_PREFIX}klines-1h/20261101T23Z_20261130T23Z.jsonl.gz",
-        f"{api.RAW_PREFIX}klines-1h/20261130T23Z_20261201T23Z.jsonl.gz",
+        f"{api.RAW_PREFIX}klines-30m/20261101T23Z_20261130T23Z.jsonl.gz",
+        f"{api.RAW_PREFIX}klines-30m/20261130T23Z_20261201T23Z.jsonl.gz",
         f"{api.RAW_PREFIX}exchange-info/20261201T001700Z.jsonl.gz",
     ]
     end = int(datetime(2026, 12, 1, 23, tzinfo=UTC).timestamp() * 1000) - 1
-    assert api.covered_until(keys) == {"klines-1h": end}
-    assert api.klines_page(api.Window(0, 98 * H - 1)) == 99
-    assert api.klines_page(api.Window(0, 99 * H - 1)) == 499  # 99 would page once for nothing
+    assert api.covered_until(keys) == {"klines-30m": end}
+    assert api.klines_page(98) == 99
+    assert api.klines_page(99) == 499  # a page of 99 would page once more for nothing
+    asked = {h.fixed.get("interval") or h.fixed.get("period") for h in api.HISTORIES}
+    assert asked == {"30m"}  # decision 0029
 
 
 def test_the_manifest_names_the_code_that_ran(tmp_path):
@@ -477,12 +484,12 @@ class FlakyStore(LocalStore):
 
 def test_a_failing_object_write_is_reported_and_does_not_stop_the_rest(tmp_path):
     client, _ = client_for(FakeBinance(NOW))
-    store = FlakyStore(tmp_path, lambda key: "/klines-1h/" in key and key.startswith("raw/"))
+    store = FlakyStore(tmp_path, lambda key: "/klines-30m/" in key and key.startswith("raw/"))
     report = api.record(client, store, now_ms=NOW, limit_bytes=10**12)
-    assert "klines-1h" not in report.written and "open-interest-1h" in report.written
-    assert any(f.startswith("klines-1h：写入失败") for f in report.failed)
+    assert "klines-30m" not in report.written and "open-interest-30m" in report.written
+    assert any(f.startswith("klines-30m：写入失败") for f in report.failed)
     report = run(tmp_path, FakeBinance(NOW + DAY), now=NOW + DAY)  # the next run records it
-    assert "klines-1h" in report.written
+    assert "klines-30m" in report.written
 
 
 def test_a_manifest_that_could_not_be_written_is_written_by_the_next_run(tmp_path):
@@ -505,9 +512,22 @@ def test_a_manifest_that_could_not_be_written_is_written_by_the_next_run(tmp_pat
     assert writer_sleeps == [1, 2]  # three tries
     (raw,) = history_keys(LocalStore(tmp_path), "funding")
     assert not LocalStore(tmp_path).exists(api.manifest_key(raw))
+    assert report.bucket_bytes == sum(LocalStore(tmp_path).sizes().values())  # unwritten: uncounted
 
     report = run(tmp_path, FakeBinance(NOW + 60_000), now=NOW + 60_000)
     assert report.healed == ["funding"] and report.failed == []
     healed = json.loads(LocalStore(tmp_path).get(api.manifest_key(raw)))
     assert healed["sha256"] == hashlib.sha256(LocalStore(tmp_path).get(raw)).hexdigest()
     assert healed["lines"] == len(lines(LocalStore(tmp_path), raw))
+    assert healed["window"]["end"] - healed["window"]["start"] + 1 == 29 * DAY
+    assert report.bucket_bytes == sum(LocalStore(tmp_path).sizes().values())
+
+
+def test_the_source_registry_names_every_recorded_dataset():
+    import tomllib
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[1] / "registry/sources/binance-api.toml"
+    source = tomllib.loads(path.read_text("utf-8"))
+    recorded = {"exchange-info", "premium-index", "funding"} | {h.name for h in api.HISTORIES}
+    assert {d["id"] for d in source["datasets"]} == recorded

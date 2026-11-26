@@ -156,6 +156,8 @@ def _record_binance(args: argparse.Namespace) -> int:
     if report.refused:
         print(f"接口明确拒绝、不会再试的请求：{report.refused} 个（例如合约已下架）")
     print(f"本次写入约 {_mb(report.stored_bytes)}")
+    used = f"已用约 {_mb(report.bucket_bytes)}"
+    print(f"本机目录{used}" if args.local else f"存储桶{used}，上限 {_mb(limit)}")
     if report.failed:
         print(f"没写成、下次重试：{len(report.failed)} 项")
         for line in report.failed:
