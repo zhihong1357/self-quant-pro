@@ -37,9 +37,11 @@ class FakeBinance:
         crowd: list[tuple[int, int]] = (),
         headers: dict | None = None,
         keeps_newest: bool = False,
+        more: int = 0,
     ) -> None:
         self.now_ms = now_ms
         self.keeps_newest = keeps_newest  # a range longer than the page: keep its newest rows
+        self.more = more  # extra USDT perpetuals, for runs of realistic size
         self.fail = fail or {}
         self.refuse = refuse
         self.funding_needs_symbol = funding_needs_symbol
@@ -64,7 +66,7 @@ class FakeBinance:
                 ("BBBUSDT", "PERPETUAL", "USDT", "SETTLING"),
                 ("CCCUSDC", "PERPETUAL", "USDC", "TRADING"),
                 ("AAAUSDT_261225", "CURRENT_QUARTER", "USDT", "TRADING"),
-            ]
+            ] + [(f"X{i:03d}USDT", "PERPETUAL", "USDT", "TRADING") for i in range(self.more)]
             keys = ("symbol", "contractType", "quoteAsset", "status")
             return ok({"symbols": [dict(zip(keys, r, strict=True)) for r in rows]})
         if path == "/fapi/v1/premiumIndex":
@@ -197,6 +199,31 @@ def test_the_next_run_continues_exactly_where_the_last_stopped(tmp_path):
     ]
     assert bars == sorted(set(bars)) and len(bars) == 30 * 48  # no bar twice, none missing
     assert {b % (H // 2) for b in bars} == {0}  # every bar on the half hour
+
+
+def test_lines_are_one_gzip_stream_and_finish_only_once():
+    lines = api.Lines.of([{"a": "é"}, {"b": 2}])
+    assert len(lines) == 2
+    assert gzip.decompress(lines.finish()) == '{"a": "é"}\n{"b": 2}\n'.encode()
+    with pytest.raises(RuntimeError):
+        lines.finish()
+    assert gzip.decompress(api.Lines().finish()) == b""
+
+
+def test_a_first_run_holds_its_month_compressed_not_as_text(tmp_path):
+    import tracemalloc
+
+    client, _ = client_for(FakeBinance(NOW, more=100))
+    tracemalloc.start()
+    try:
+        report = api.record(client, LocalStore(tmp_path), now_ms=NOW, limit_bytes=10**12)
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert report.symbols == 102 and report.failed == []
+    (key,) = history_keys(LocalStore(tmp_path), "klines-30m")
+    text = len(gzip.decompress(LocalStore(tmp_path).get(key)))
+    assert peak < text / 2  # holding the text even once, let alone dumped and joined, fails
 
 
 @pytest.mark.parametrize("keeps_newest", [False, True])
