@@ -18,6 +18,9 @@ plentiful and the published carry has decayed). The return has two parts, report
 apart: the price change, and the funding paid or received at the settlements the
 positions are held through.
 
+H-0009 is A rebalanced weekly on the week's average rate (`rebalance_hours` = 168):
+T-0004 found the daily ranks churning, and turnover costs ate most of the premium.
+
 B, H-0003: liquidity and short-term reversal. Every day at 00:00 UTC, split the
 eligible contracts into thirds by the same volume; within the least liquid third, go
 long the fifth that fell most over the previous day and short the fifth that rose most,
@@ -520,7 +523,7 @@ def sections(m: dict, p: dict) -> dict:
     taker = est["taker"] or NONE
     verdict = "通过" if test["passes"] else "不通过"
     if c == "A":
-        name = "中小合约的横截面资金费率（H-0002）"
+        name = "中小合约的横截面资金费率"
         who = "流动性最好的三分之一除外"
         how = (
             f"每 {p['rebalance_hours']} 小时（00:00 结算后 1 分钟）"
@@ -535,7 +538,7 @@ def sections(m: dict, p: dict) -> dict:
         rows = [("吃单", taker), ("挂单（参考）", est["maker_reference"] or NONE)]
         names = est["names_per_period"]
     else:
-        name = "流动性越差、反转越强（H-0003）"
+        name = "流动性越差、反转越强"
         who = "只取流动性最差的三分之一；流动性最好的三分之一同样做一遍作对照"
         how = "每天 00:00（UTC）按前一天的涨跌（用每天最后一小时的成交均价计算）"
         least, most = est["least_liquid"], est["most_liquid"]
@@ -560,7 +563,8 @@ def sections(m: dict, p: dict) -> dict:
             f"用于功效的效应 {f3(test['effect_for_power'])}，门槛 {f3(test['hurdle'])}，"
             f"确认集上的把握 {f3(test['power'])}：功效检验{verdict}。{parts}"
         ),
-        "假说与机制": f"见 registry/hypotheses/H-000{2 if c == 'A' else 3}.toml。",
+        # The runner's heading names the card: more than one card runs candidate A.
+        "假说与机制": "见报告标题里的假说卡（registry/hypotheses/ 下的同名文件）。",
         "数据": (
             "Binance U 本位永续，经时点接口只读探索集：1 小时 K 线"
             + ("和资金费率" if c == "A" else "")
