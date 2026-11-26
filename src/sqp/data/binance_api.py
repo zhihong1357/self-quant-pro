@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import gzip
 import hashlib
+import io
 import json
 import math
 import re
@@ -223,6 +224,37 @@ def _line(path: str, params: dict, reply: Reply, at: str) -> dict:
     return line
 
 
+class Lines:
+    """Response lines, gzip'd as they arrive. A first run holds a month of every contract;
+    kept as text it ran the 1 GiB job out of memory (2026-11-26)."""
+
+    def __init__(self) -> None:
+        self._buffer = io.BytesIO()
+        self._gzip = gzip.GzipFile(fileobj=self._buffer, mode="wb", mtime=0)
+        self._count = 0
+
+    @classmethod
+    def of(cls, lines: list[dict]) -> Lines:
+        out = cls()
+        for line in lines:
+            out.append(line)
+        return out
+
+    def append(self, line: dict) -> None:
+        text = json.dumps(line, sort_keys=True, ensure_ascii=False) + "\n"
+        self._gzip.write(text.encode("utf-8"))
+        self._count += 1
+
+    def __len__(self) -> int:
+        return self._count
+
+    def finish(self) -> bytes:
+        """The gzip'd bytes, once; the buffer is let go."""
+        self._gzip.close()
+        data, self._buffer = self._buffer.getvalue(), io.BytesIO()
+        return data
+
+
 def _now_text() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
 
@@ -236,10 +268,10 @@ def fetch_per_symbol(
     symbols: list[str],
     time_of: Callable[[object], int],
     now: Callable[[], str] = _now_text,
-) -> tuple[list[dict], int]:
+) -> tuple[Lines, int]:
     """Every symbol's rows, piece after piece (a window and its page size), paging forward
     inside a piece. A final 4xx answer is kept and ends that symbol."""
-    lines, refused = [], 0
+    lines, refused = Lines(), 0
     for symbol in symbols:
         for piece, page in pieces:
             cursor, answered = piece.start, True
@@ -269,10 +301,10 @@ def fetch_funding(
     window: Window,
     symbols: list[str],
     now: Callable[[], str] = _now_text,
-) -> tuple[list[dict], int]:
+) -> tuple[Lines, int]:
     """Funding settlements of every contract, one hour at a time; an hour that fills a
     whole page is halved until it does not. If the API wants a symbol, ask per symbol."""
-    path, lines = "/fapi/v1/fundingRate", []
+    path, lines = "/fapi/v1/fundingRate", Lines()
     todo = [
         (start, min(start + HOUR_MS - 1, window.end))
         for start in range(window.start, window.end + 1, HOUR_MS)
@@ -384,11 +416,8 @@ class Writer:
     code_commit: str = ""
     sleep: Callable[[float], None] = time.sleep
 
-    def write(self, dataset: str, key: str, lines: list[dict], extra: dict, report: Report) -> None:
-        text = "".join(
-            json.dumps(line, sort_keys=True, ensure_ascii=False) + "\n" for line in lines
-        )
-        data = gzip.compress(text.encode("utf-8"), mtime=0)
+    def write(self, dataset: str, key: str, lines: Lines, extra: dict, report: Report) -> None:
+        data = lines.finish()
         if self.total_bytes + len(data) > self.limit_bytes:
             report.failed.append(f"{dataset}：存储桶会超过上限，没写")
             return
@@ -450,7 +479,8 @@ def heal(store: Store, raw_keys: list[str], writer: Writer, report: Report) -> N
         dataset = key[len(RAW_PREFIX) :].split("/", 1)[0]
         try:
             data = store.get(key)
-            lines = gzip.decompress(data).count(b"\n")
+            with gzip.GzipFile(fileobj=io.BytesIO(data)) as text:  # never all of it at once
+                lines = sum(chunk.count(b"\n") for chunk in iter(lambda: text.read(1 << 20), b""))
         except Exception as exc:
             report.failed.append(f"{dataset}：补写清单时读不到原始对象（{type(exc).__name__}）")
             continue
@@ -500,14 +530,14 @@ def record(
             raise NotFinal(f"{path}：{reply.status}")
         snapshots[dataset] = reply
         line = _line(path, {}, reply, _now_text())
-        writer.write(dataset, f"{RAW_PREFIX}{dataset}/{run}.jsonl.gz", [line], {}, report)
+        writer.write(dataset, f"{RAW_PREFIX}{dataset}/{run}.jsonl.gz", Lines.of([line]), {}, report)
     symbols = perpetuals(snapshots["exchange-info"].body)
     report.symbols = len(symbols)
 
     ends = covered_until(keys)
     last = last_hour_end(now_ms - SETTLE_MS)
     floor = last + 1 - LOOKBACK_MS
-    plans: list[tuple[str, Callable[[Window], tuple[list[dict], int]]]] = [
+    plans: list[tuple[str, Callable[[Window], tuple[Lines, int]]]] = [
         ("funding", lambda w: fetch_funding(client, w, symbols)),
     ]
     for h in HISTORIES:
