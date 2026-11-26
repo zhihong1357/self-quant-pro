@@ -28,7 +28,14 @@ same way as the comparison the mechanism predicts to be weaker; it is reported o
 
 Costs (decision 0026): every trade pays the taker fee plus half the bid-ask spread,
 estimated per contract from the previous 30 days of hourly highs, lows and closes
-(Abdi and Ranaldo 2017). Maker costs (fee only) are reported as a reference.
+(Abdi and Ranaldo 2017). Maker costs (fee only) are reported as a reference. Only a
+contract whose own spread can be estimated is tradable, so every entry pays its own.
+
+There is one run on real data, and a crash counts as a trial: a bar without positive,
+finite prices or a funding record without a finite rate is dropped, a settlement
+recorded twice is averaged, a missing or zero settlement interval counts as 8 hours,
+and too few periods give no summary rather than an error. How much of each was met is
+reported under data_issues.
 
 The power test (decision 0026): effect = min(half the full-sample annualised net
 Sharpe, the Sharpe over the last 365 days), both corrected for autocorrelation (the
@@ -74,11 +81,46 @@ def day(text: str) -> datetime:
 def every_day(table: pl.DataFrame) -> pl.DataFrame:
     """`table` (symbol, day, ...) on every calendar day from its first to its last, the
     missing days null: a rolling window of n rows is then n days."""
+    if table.is_empty():
+        return table
     days = pl.datetime_range(
         table["day"].min(), table["day"].max(), "1d", time_unit="us", time_zone="UTC", eager=True
     )
     grid = table.select("symbol").unique().join(pl.DataFrame({"day": days}), how="cross")
     return grid.join(table, on=["symbol", "day"], how="left").sort("symbol", "day")
+
+
+def valid_bars(klines: pl.DataFrame) -> pl.DataFrame:
+    """Bars with positive, finite prices and a finite, non-negative volume. A zero or
+    missing low would make the spread estimate infinite and the run crash."""
+    prices = [pl.col(c).is_finite() & (pl.col(c) > 0) for c in ("close", "high", "low")]
+    volume = pl.col("quote_volume").is_finite() & (pl.col("quote_volume") >= 0)
+    return klines.filter(pl.all_horizontal(*prices) & volume)
+
+
+def settlements(funding: pl.DataFrame) -> pl.DataFrame:
+    """symbol, calc_time, knowable_time, funding_rate, per_8h: one row per settlement,
+    with a finite rate. A settlement recorded twice is averaged, not counted twice; a
+    missing or non-positive interval counts as 8 hours."""
+    hours = (
+        pl.when(pl.col("funding_interval_hours") > 0)
+        .then(pl.col("funding_interval_hours"))
+        .otherwise(8)
+    )
+    return (
+        funding.filter(pl.col("funding_rate").is_finite())
+        .with_columns(
+            pl.col("calc_time", "knowable_time").cast(TIME),
+            per_8h=pl.col("funding_rate") * 8 / hours,
+        )
+        .group_by("symbol", "calc_time")
+        .agg(
+            pl.col("knowable_time").min(),
+            pl.col("funding_rate").mean(),
+            pl.col("per_8h").mean(),
+        )
+        .sort("calc_time", "symbol")
+    )
 
 
 def daily_volume(klines: pl.DataFrame) -> pl.DataFrame:
@@ -123,7 +165,7 @@ def half_spread(klines: pl.DataFrame, days: int, min_days: int) -> pl.DataFrame:
         )
         .filter(pl.col("next_open") - pl.col("open_time") == HOUR)  # consecutive bars only
         .with_columns(term=4 * (pl.col("c") - pl.col("m")) * (pl.col("c") - pl.col("m_next")))
-        .drop_nulls("term")
+        .filter(pl.col("term").is_finite())
     )
     daily = terms.group_by("symbol", pl.col("next_open").dt.truncate("1d").alias("day")).agg(
         pl.col("term").mean()
@@ -155,15 +197,21 @@ def cost_table(
     spread: pl.DataFrame, prices: pl.DataFrame, fee: float, with_spread: bool
 ) -> pl.DataFrame:
     """symbol, time, cost_rate, fallback: the one-way cost of trading each contract at each
-    time. A contract without its own spread estimate (a gap in its data) pays the
-    widest estimate of that time; how often that happens is reported."""
+    time. Only contracts with their own spread estimate are tradable, and a contract
+    that stops trading keeps its last one, so this should never be needed; as a safety
+    net, a contract without one pays the widest estimate known at that time (never one
+    from later). How often that happens is reported."""
     rows = by_day(spread, prices.select("symbol", "time")).with_columns(
         fallback=pl.col("half_spread").is_null()
     )
-    rows = rows.with_columns(
-        pl.col("half_spread")
-        .fill_null(pl.col("half_spread").max().over("time"))
-        .fill_null(pl.col("half_spread").max())
+    widest = (
+        rows.group_by("time")
+        .agg(widest=pl.col("half_spread").max())
+        .sort("time")
+        .with_columns(pl.col("widest").forward_fill())  # only what was known by then
+    )
+    rows = rows.join(widest, on="time", how="left").with_columns(
+        pl.col("half_spread").fill_null(pl.col("widest"))
     )
     spread_part = pl.col("half_spread") if with_spread else pl.lit(0.0)
     return rows.select("symbol", "time", (fee + spread_part).alias("cost_rate"), "fallback")
@@ -174,16 +222,24 @@ def fallback_share(weights: pl.DataFrame, costs: pl.DataFrame) -> float | None:
     return rounded(held["fallback"].fill_null(True).mean()) if held.height else None
 
 
-def eligible_thirds(prices: pl.DataFrame, liq: pl.DataFrame, min_volume: float) -> pl.DataFrame:
-    """symbol, time, third: contracts with a fresh price and enough volume, split into
-    thirds by liquidity within each time (1 = least liquid), ties broken by symbol."""
-    rows = by_day(liq, prices.filter("fresh").select("symbol", "time"))
+def eligible_thirds(
+    prices: pl.DataFrame, liq: pl.DataFrame, spread: pl.DataFrame, min_volume: float
+) -> pl.DataFrame:
+    """symbol, time, third: contracts with a fresh price, enough volume and their own
+    spread estimate, split into thirds by liquidity within each time (1 = least
+    liquid), ties broken by symbol."""
+    rows = by_day(spread, by_day(liq, prices.filter("fresh").select("symbol", "time")))
     return (
-        rows.filter(pl.col("liquidity") >= min_volume)
+        rows.filter((pl.col("liquidity") >= min_volume) & pl.col("half_spread").is_not_null())
         .sort("time", "liquidity", "symbol")
         .with_columns(n=pl.len().over("time"), rank=pl.int_range(pl.len()).over("time"))
         .select("symbol", "time", (pl.col("rank") * 3 // pl.col("n") + 1).alias("third"))
     )
+
+
+def summary(periods: pl.DataFrame, ppy: int, column: str = "net") -> dict | None:
+    """The engine's summary, or None when there are too few periods for one."""
+    return summarize(periods, column=column, periods_per_year=ppy) if periods.height >= 4 else None
 
 
 def run_portfolio(
@@ -198,15 +254,16 @@ def run_portfolio(
     taker series itself."""
     net = portfolio_returns(weights, returns, carry=carry, cost_rate=taker)
     ref = portfolio_returns(weights, returns, carry=carry, cost_rate=maker)
+    names = net["longs"].mean() + net["shorts"].mean() if net.height else None
     out = {
-        "taker": summarize(net, periods_per_year=ppy),
-        "maker_reference": summarize(ref, periods_per_year=ppy),
-        "gross_price_only": summarize(net, column="gross", periods_per_year=ppy),
-        "names_per_period": rounded(float(net["longs"].mean() + net["shorts"].mean())),
+        "taker": summary(net, ppy),
+        "maker_reference": summary(ref, ppy),
+        "gross_price_only": summary(net, ppy, column="gross"),
+        "names_per_period": rounded(float(names)) if names is not None else None,
         "cost_fallback_share": fallback_share(weights, taker),
     }
     if carry is not None:
-        out["carry_only"] = summarize(net, column="carry", periods_per_year=ppy)
+        out["carry_only"] = summary(net, ppy, column="carry")
     return out, net
 
 
@@ -218,13 +275,8 @@ def funding_signal(funding: pl.DataFrame, times: list[datetime], window: timedel
     settlements that became knowable in (time - window, time]. A contract with none in
     that window has no signal."""
     rates = (
-        funding.select(
-            "symbol",
-            pl.col("knowable_time").cast(TIME),
-            (pl.col("funding_rate") * 8 / pl.col("funding_interval_hours").fill_null(8)).alias(
-                "value"
-            ),
-        )
+        settlements(funding)
+        .select("symbol", "knowable_time", pl.col("per_8h").alias("value"))
         .filter(pl.col("value").is_finite())
         .sort("knowable_time")
     )
@@ -247,11 +299,11 @@ def funding_carry(funding: pl.DataFrame, times: list[datetime]) -> pl.DataFrame:
     Settlements are on the hour; the recorded time can be a little later, so it is
     rounded down to its hour first."""
     starts = pl.DataFrame({"time": pl.Series(times).cast(TIME)}).sort("time")
-    settled = funding.select(
-        "symbol",
-        pl.col("calc_time").cast(TIME).dt.truncate("1h").alias("settled"),
-        "funding_rate",
-    ).sort("settled")
+    settled = (
+        settlements(funding)
+        .select("symbol", pl.col("calc_time").dt.truncate("1h").alias("settled"), "funding_rate")
+        .sort("settled")
+    )
     # Each settlement belongs to the last rebalance strictly before it.
     owner = settled.join_asof(
         starts.with_columns(start=pl.col("time")),
@@ -267,27 +319,40 @@ def funding_carry(funding: pl.DataFrame, times: list[datetime]) -> pl.DataFrame:
     )
 
 
+def data_issues(klines: pl.DataFrame, bars: pl.DataFrame, funding: pl.DataFrame | None) -> dict:
+    out = {"bars_dropped": klines.height - bars.height}
+    if funding is not None:
+        finite = funding.filter(pl.col("funding_rate").is_finite())
+        out["funding_rows_dropped"] = funding.height - finite.height
+        out["settlements_recorded_twice"] = finite.height - settlements(funding).height
+        out["intervals_assumed_8h"] = funding.filter(
+            pl.col("funding_interval_hours").fill_null(0) <= 0
+        ).height
+    return out
+
+
 def candidate_a(klines: pl.DataFrame, funding: pl.DataFrame, p: dict) -> dict:
+    bars = valid_bars(klines)
     offset = timedelta(minutes=int(p["offset_minutes"]))
     every = timedelta(hours=int(p["rebalance_hours"]))
     times = rebalance_times(day(p["start"]) + offset, day(p["end"]) + offset, every)
-    prices = prices_at(klines, times, max_staleness=HOUR)
+    prices = prices_at(bars, times, max_staleness=HOUR)
     returns = period_returns(prices)
-    liq = liquidity(daily_volume(klines), int(p["liquidity_days"]), int(p["liquidity_min_days"]))
-    thirds = eligible_thirds(prices, liq, float(p["min_volume"]))
+    liq = liquidity(daily_volume(bars), int(p["liquidity_days"]), int(p["liquidity_min_days"]))
+    spread = half_spread(bars, int(p["spread_days"]), int(p["spread_min_days"]))
+    thirds = eligible_thirds(prices, liq, spread, float(p["min_volume"]))
     small = thirds.filter((pl.col("third") <= 2) & (pl.col("time") < times[-1]))
     tradable = prices.join(small, on=["symbol", "time"], how="semi")
     signal = funding_signal(funding, times, window=every)
     weights = quantile_weights(
         signal, tradable, groups=int(p["groups"]), long="low", min_names=int(p["min_names"])
     )
-    spread = half_spread(klines, int(p["spread_days"]), int(p["spread_min_days"]))
     taker = cost_table(spread, prices, float(p["taker_fee"]), with_spread=True)
     maker = cost_table(spread, prices, float(p["maker_fee"]), with_spread=False)
     carry = funding_carry(funding, times)
     ppy = round(timedelta(days=365) / every)
     out, _ = run_portfolio(weights, returns, carry, taker, maker, ppy=ppy)
-    return out
+    return out | {"data_issues": data_issues(klines, bars, funding)}
 
 
 # --- candidate B: reversal ---------------------------------------------------------
@@ -302,19 +367,20 @@ def vwap_bars(klines: pl.DataFrame) -> pl.DataFrame:
 
 
 def candidate_b(klines: pl.DataFrame, p: dict) -> dict:
+    bars = valid_bars(klines)
     times = rebalance_times(day(p["start"]), day(p["end"]), DAY)
-    prices = prices_at(klines, times, max_staleness=HOUR)
+    prices = prices_at(bars, times, max_staleness=HOUR)
     returns = period_returns(prices)
-    moved = period_returns(prices_at(vwap_bars(klines), times, max_staleness=HOUR))
+    moved = period_returns(prices_at(vwap_bars(bars), times, max_staleness=HOUR))
     past = moved.select(
         "symbol",
         pl.col("next_time").alias("time"),
         pl.col("ret").alias("value"),
         pl.col("next_time").alias("knowable_time"),
     )
-    liq = liquidity(daily_volume(klines), int(p["liquidity_days"]), int(p["liquidity_min_days"]))
-    thirds = eligible_thirds(prices, liq, float(p["min_volume"]))
-    spread = half_spread(klines, int(p["spread_days"]), int(p["spread_min_days"]))
+    liq = liquidity(daily_volume(bars), int(p["liquidity_days"]), int(p["liquidity_min_days"]))
+    spread = half_spread(bars, int(p["spread_days"]), int(p["spread_min_days"]))
+    thirds = eligible_thirds(prices, liq, spread, float(p["min_volume"]))
     taker = cost_table(spread, prices, float(p["taker_fee"]), with_spread=True)
     maker = cost_table(spread, prices, float(p["maker_fee"]), with_spread=False)
     out, gross = {}, {}
@@ -332,22 +398,24 @@ def candidate_b(klines: pl.DataFrame, p: dict) -> dict:
         .join(gross["most_liquid"], on="time", suffix="_most")
         .select("time", (pl.col("gross") - pl.col("gross_most")).alias("net"))
     )
-    out["least_minus_most_gross"] = summarize(gap, periods_per_year=365)
+    out["least_minus_most_gross"] = summary(gap, 365)  # reported only: may be None
     # What the power test judges, and its maker reference: the least liquid third.
     out["taker"] = out["least_liquid"]["taker"]
     out["maker_reference"] = out["least_liquid"]["maker_reference"]
-    return out
+    return out | {"data_issues": data_issues(klines, bars, None)}
 
 
 # --- the power test (decision 0026) ---------------------------------------------
 
 
-def power_test(summary: dict, p: dict) -> dict:
+def power_test(result: dict | None, p: dict) -> dict:
     # Returns that follow each other overstate a Sharpe ratio annualised from short
-    # periods (Lo 2002): the corrected values are the ones judged.
-    full = summary["sharpe_annual_hac"]
-    recent = summary["sharpe_last_365_days_hac"]
-    bear = summary["sharpe_by_year"].get(str(p["bear_year"]))
+    # periods (Lo 2002): the corrected values are the ones judged. No summary (too few
+    # periods) is no evidence: the effect is 0.
+    result = result or {"sharpe_annual_hac": None, "sharpe_last_365_days_hac": None}
+    full = result["sharpe_annual_hac"]
+    recent = result["sharpe_last_365_days_hac"]
+    bear = result.get("sharpe_by_year", {}).get(str(p["bear_year"]))
     usable = full is not None and full > 0 and bear is not None and bear > 0 and recent is not None
     effect = min(full / 2, recent) if usable else 0.0
     years = int(p["confirmation_days"]) / 365
@@ -374,7 +442,7 @@ def evaluate(klines: pl.DataFrame, funding: pl.DataFrame | None, p: dict) -> Out
         result = candidate_b(klines, p)
     else:
         raise ValueError('candidate 只能是 "A" 或 "B"')
-    test = power_test(result["taker"], p)
+    test = power_test(result["taker"], p)  # None (too few periods) fails
     metrics = {"candidate": p["candidate"], "estimate": result, "power_test": test}
     verdict = "通过" if test["passes"] else "不通过"
     return Outcome(metrics=metrics, sections=sections(metrics, p), verdict=verdict)
@@ -401,8 +469,26 @@ def f3(x: float | None) -> str:
     return "无" if x is None else f"{x:.3f}"
 
 
-def by_year(summary: dict) -> str:
-    return "，".join(f"{y} 年 {f3(s)}" for y, s in summary["sharpe_by_year"].items())
+NONE = {
+    k: None
+    for k in (
+        "mean_annual",
+        "vol_annual",
+        "sharpe_annual",
+        "t_stat",
+        "t_stat_hac",
+        "max_drawdown",
+        "turnover_annual",
+        "cost_annual",
+        "sharpe_last_365_days",
+        "autocorrelation_factor",
+        "positive_quarters",
+    )
+} | {"sharpe_by_year": {}}
+
+
+def by_year(s: dict) -> str:
+    return "，".join(f"{y} 年 {f3(v)}" for y, v in s["sharpe_by_year"].items()) or "无"
 
 
 def row(label: str, s: dict) -> str:
@@ -415,7 +501,7 @@ def row(label: str, s: dict) -> str:
 
 def sections(m: dict, p: dict) -> dict:
     c, est, test = m["candidate"], m["estimate"], m["power_test"]
-    taker = est["taker"]
+    taker = est["taker"] or NONE
     verdict = "通过" if test["passes"] else "不通过"
     if c == "A":
         name = "中小合约的横截面资金费率（H-0002）"
@@ -427,10 +513,10 @@ def sections(m: dict, p: dict) -> dict:
         fallback = est["cost_fallback_share"]
         parts = (
             "拆开看（吃单）：只算价格变动的年化夏普 "
-            f"{f3(est['gross_price_only']['sharpe_annual'])}，"
-            f"只算资金费的 {f3(est['carry_only']['sharpe_annual'])}。"
+            f"{f3((est['gross_price_only'] or NONE)['sharpe_annual'])}，"
+            f"只算资金费的 {f3((est['carry_only'] or NONE)['sharpe_annual'])}。"
         )
-        rows = [("吃单", taker), ("挂单（参考）", est["maker_reference"])]
+        rows = [("吃单", taker), ("挂单（参考）", est["maker_reference"] or NONE)]
         names = est["names_per_period"]
     else:
         name = "流动性越差、反转越强（H-0003）"
@@ -440,13 +526,13 @@ def sections(m: dict, p: dict) -> dict:
         fallback = least["cost_fallback_share"]
         parts = (
             "对照：流动性最好的三分之一，吃单后年化夏普 "
-            f"{f3(most['taker']['sharpe_annual'])}；成本前，最差减最好的年化夏普 "
-            f"{f3(est['least_minus_most_gross']['sharpe_annual'])}（机制预测为正）。"
+            f"{f3((most['taker'] or NONE)['sharpe_annual'])}；成本前，最差减最好的年化夏普 "
+            f"{f3((est['least_minus_most_gross'] or NONE)['sharpe_annual'])}（机制预测为正）。"
         )
         rows = [
             ("吃单", taker),
-            ("挂单（参考）", est["maker_reference"]),
-            ("对照：流动性最好，吃单", most["taker"]),
+            ("挂单（参考）", est["maker_reference"] or NONE),
+            ("对照：流动性最好，吃单", most["taker"] or NONE),
         ]
         names = least["names_per_period"]
     text = {
