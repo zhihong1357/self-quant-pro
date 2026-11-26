@@ -46,6 +46,9 @@ PLANNED_A = {
     "prior": 0.35,
 }
 PLANNED_B = {**COMMON, "candidate": "B", "end": "2024-01-31", "prior": 0.30}
+# T-0006: A rebalanced weekly on the 7-day average rate (H-0009, decision 0027). T-0004
+# showed the daily ranks churn, and turnover costs ate most of the premium.
+PLANNED_A_WEEKLY = {**PLANNED_A, "rebalance_hours": 168, "prior": 0.30}
 
 
 def utc(*args: int) -> datetime:
@@ -487,7 +490,11 @@ class RecordingPit:
 
 @pytest.mark.parametrize(
     ("planned", "datasets"),
-    [(PLANNED_A, {"um-klines-1h", "um-funding"}), (PLANNED_B, {"um-klines-1h"})],
+    [
+        (PLANNED_A, {"um-klines-1h", "um-funding"}),
+        (PLANNED_B, {"um-klines-1h"}),
+        (PLANNED_A_WEEKLY, {"um-klines-1h", "um-funding"}),
+    ],
 )
 def test_the_planned_cards_read_only_exploration(flat, planned, datasets):
     pit = RecordingPit({"um-klines-1h": flat[0], "um-funding": flat[1]})
@@ -520,15 +527,48 @@ def test_the_planned_windows():
     assert first_liquidity >= timedelta(days=PLANNED_A["liquidity_min_days"])
 
 
+def test_the_weekly_window_ends_on_the_same_exit():
+    """2020-01-01 to 2024-01-31 is exactly 213 weeks, so the weekly card's last time is
+    the daily card's: 00:01 on 31 January, its price bar still in exploration."""
+    w = fc.rebalance_times(
+        fc.day(PLANNED_A_WEEKLY["start"]) + timedelta(minutes=1),
+        fc.day(PLANNED_A_WEEKLY["end"]) + timedelta(minutes=1),
+        timedelta(hours=PLANNED_A_WEEKLY["rebalance_hours"]),
+    )
+    assert (w[0], w[-1], len(w)) == (utc(2020, 1, 1, 0, 1), utc(2024, 1, 31, 0, 1), 214)
+    assert w[-1] + H < fc.day(PLANNED_A_WEEKLY["read_until"])
+
+
+def test_weekly_rebalancing_trades_less_and_annualises_by_52(flat):
+    """Same market, same rules, one rebalance a week instead of a day: the judged series is
+    annualised with 52 periods, and turnover and costs per year fall."""
+    daily = fc.evaluate(*flat, synthetic(PLANNED_A)).metrics["estimate"]
+    weekly = fc.evaluate(*flat, synthetic(PLANNED_A_WEEKLY)).metrics["estimate"]
+    d, w = daily["taker"], weekly["taker"]
+    assert w["periods"] * 7 == pytest.approx(d["periods"], rel=0.01)
+    assert w["turnover_annual"] < d["turnover_annual"] / 2
+    assert w["cost_annual"] < d["cost_annual"] / 2
+    assert weekly["carry_only"]["mean_annual"] > 0  # the funding is still collected
+
+
+def test_reports_name_no_card_of_their_own(flat):
+    """H-0002 and H-0009 both run candidate A: the runner's heading names the card, so
+    the study's own text must not name one."""
+    for planned in (PLANNED_A, PLANNED_A_WEEKLY):
+        text = "".join(fc.evaluate(*flat, synthetic(planned)).sections.values())
+        assert "H-0" not in text
+
+
 def test_the_registered_cards_carry_the_reviewed_parameters():
-    """T-0004 and T-0005 must run exactly what was reviewed: PLANNED_A and PLANNED_B."""
+    """T-0004, T-0005 and T-0006 must run exactly what was reviewed."""
     from pathlib import Path
 
     from sqp.research import trials
 
     text = (Path(__file__).resolve().parents[1] / trials.TRIALS).read_text("utf-8")
     cards = {t.hypothesis: t for t in trials.parse(text) if t.study == "first_candidates"}
-    assert set(cards) == {"H-0002", "H-0003"}
+    assert set(cards) == {"H-0002", "H-0003", "H-0009"}
     assert dict(cards["H-0002"].params) == PLANNED_A
     assert dict(cards["H-0003"].params) == PLANNED_B
+    assert dict(cards["H-0009"].params) == PLANNED_A_WEEKLY
     assert all(t.segment == "exploration" and not t.repeat_of for t in cards.values())
