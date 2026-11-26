@@ -36,8 +36,10 @@ class FakeBinance:
         funding_needs_symbol: bool = False,
         crowd: list[tuple[int, int]] = (),
         headers: dict | None = None,
+        keeps_newest: bool = False,
     ) -> None:
         self.now_ms = now_ms
+        self.keeps_newest = keeps_newest  # a range longer than the page: keep its newest rows
         self.fail = fail or {}
         self.refuse = refuse
         self.funding_needs_symbol = funding_needs_symbol
@@ -74,7 +76,7 @@ class FakeBinance:
             step = STEPS[params["interval"]]
             first = -(-start // step) * step
             bars = [[t, "1", "1", "1", "1", "9", t + step - 1] for t in range(first, end + 1, step)]
-            return ok(bars[:limit], self.headers)
+            return ok(self._page(bars, limit), self.headers)
         if path == "/futures/data/openInterestHist":
             step = STEPS[params["period"]]
             oldest = self.now_ms - 30 * DAY
@@ -83,11 +85,14 @@ class FakeBinance:
                 {"symbol": params["symbol"], "sumOpenInterest": "5", "timestamp": t}
                 for t in range(first, end + 1, step)
             ]
-            return ok(rows[:limit])
+            return ok(self._page(rows, limit))
         assert path == "/fapi/v1/fundingRate"
         if "symbol" not in params and self.funding_needs_symbol:
             return api.Reply(400, b'{"code":-1102,"msg":"symbol required"}', {})
         return ok(self._settlements(params.get("symbol"), start, end)[:limit])
+
+    def _page(self, rows: list, limit: int) -> list:
+        return rows[-limit:] if self.keeps_newest else rows[:limit]
 
     def _settlements(self, symbol: str | None, start: int, end: int) -> list[dict]:
         rows = []
@@ -192,6 +197,27 @@ def test_the_next_run_continues_exactly_where_the_last_stopped(tmp_path):
     ]
     assert bars == sorted(set(bars)) and len(bars) == 30 * 48  # no bar twice, none missing
     assert {b % (H // 2) for b in bars} == {0}  # every bar on the half hour
+
+
+@pytest.mark.parametrize("keeps_newest", [False, True])
+def test_no_answer_fills_a_page_so_either_end_of_a_range_is_whole(tmp_path, keeps_newest):
+    # Binance documents klines from startTime on; for open interest it does not say which
+    # end of a longer range it keeps. Pieces that cannot fill a page make that moot.
+    fake = FakeBinance(NOW, keeps_newest=keeps_newest)
+    run(tmp_path, fake)
+    store = LocalStore(tmp_path)
+    for dataset, time_of in (("klines-30m", lambda r: r[0]), ("open-interest-30m", None)):
+        (key,) = history_keys(store, dataset)
+        got = [
+            time_of(r) if time_of else r["timestamp"]
+            for line in lines(store, key)
+            if line["params"]["symbol"] == "AAAUSDT"
+            for r in json.loads(line["body"])
+        ]
+        assert got == sorted(set(got)) and len(got) == 29 * 48, dataset
+    for path, params in fake.calls:
+        if path in ("/fapi/v1/klines", "/futures/data/openInterestHist"):
+            assert (params["endTime"] + 1 - params["startTime"]) // (H // 2) < params["limit"]
 
 
 def test_within_the_same_hour_there_is_nothing_new_to_record(tmp_path):

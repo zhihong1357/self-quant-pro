@@ -232,31 +232,35 @@ def fetch_per_symbol(
     group: str,
     path: str,
     fixed: dict,
-    window: Window,
+    pieces: list[tuple[Window, int]],
     symbols: list[str],
-    page: int,
     time_of: Callable[[object], int],
     now: Callable[[], str] = _now_text,
 ) -> tuple[list[dict], int]:
-    """Every symbol's rows in the window, paging forward; final 4xx answers are kept."""
+    """Every symbol's rows, piece after piece (a window and its page size), paging forward
+    inside a piece. A final 4xx answer is kept and ends that symbol."""
     lines, refused = [], 0
     for symbol in symbols:
-        cursor = window.start
-        while cursor <= window.end:
-            params = {**fixed, "symbol": symbol, "startTime": cursor}
-            params |= {"endTime": window.end, "limit": page}
-            reply = client.call(group, path, params)
-            lines.append(_line(path, params, reply, now()))
-            if reply.status != 200:
+        for piece, page in pieces:
+            cursor, answered = piece.start, True
+            while cursor <= piece.end:
+                params = {**fixed, "symbol": symbol, "startTime": cursor}
+                params |= {"endTime": piece.end, "limit": page}
+                reply = client.call(group, path, params)
+                lines.append(_line(path, params, reply, now()))
+                if reply.status != 200:
+                    answered = False
+                    break
+                rows = json.loads(reply.body)
+                if len(rows) < page:
+                    break
+                nxt = time_of(rows[-1]) + 1
+                if nxt <= cursor:
+                    raise NotFinal(f"{path} {symbol}：翻页没有前进")
+                cursor = nxt
+            if not answered:
                 refused += 1
                 break
-            rows = json.loads(reply.body)
-            if len(rows) < page:
-                break
-            nxt = time_of(rows[-1]) + 1
-            if nxt <= cursor:
-                raise NotFinal(f"{path} {symbol}：翻页没有前进")
-            cursor = nxt
     return lines, refused
 
 
@@ -279,8 +283,9 @@ def fetch_funding(
         params = {"startTime": start, "endTime": end, "limit": FUNDING_PAGE}
         reply = client.call("funding", path, params)
         if reply.status == 400 and not lines:
+            pieces = [(window, FUNDING_PAGE)]
             return fetch_per_symbol(
-                client, "funding", path, {}, window, symbols, FUNDING_PAGE, _funding_time, now
+                client, "funding", path, {}, pieces, symbols, _funding_time, now
             )
         if reply.status != 200:
             raise NotFinal(f"{path} {params}：{reply.status}")
@@ -336,10 +341,24 @@ HISTORIES = (
 )
 
 
+KLINES_PAGE = 499  # the largest limit that still costs 2
+
+
 def klines_page(rows: int) -> int:
     """Binance weighs a klines request by its limit: under 100 costs 1, under 500 costs 2.
     Exactly 99 rows would fill a page of 99 and then ask once more for nothing."""
-    return 99 if rows < 99 else 499
+    return 99 if rows < 99 else KLINES_PAGE
+
+
+def pieces(window: Window, h: History) -> list[tuple[Window, int]]:
+    """The window cut into pieces no answer can fill, each with its page size. Then the
+    rows do not depend on which end of a longer range the API would keep."""
+    step = ((h.page or KLINES_PAGE) - 1) // h.per_hour * HOUR_MS
+    out = []
+    for start in range(window.start, window.end + 1, step):
+        piece = Window(start, min(start + step - 1, window.end))
+        out.append((piece, h.page or klines_page(piece.hours * h.per_hour)))
+    return out
 
 
 @dataclass
@@ -494,8 +513,9 @@ def record(
     for h in HISTORIES:
 
         def fetch(w: Window, h: History = h):
-            size = h.page or klines_page(w.hours * h.per_hour)
-            return fetch_per_symbol(client, h.group, h.path, h.fixed, w, symbols, size, h.time_of)
+            return fetch_per_symbol(
+                client, h.group, h.path, h.fixed, pieces(w, h), symbols, h.time_of
+            )
 
         plans.append((h.name, fetch))
     for dataset, fetch in plans:
