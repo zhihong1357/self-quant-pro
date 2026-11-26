@@ -30,4 +30,4 @@
 | [0024](0024-import-gen1-recordings.md) | 每天导入第一代的录制数据；只读令牌放在只许 main 使用的环境里 |
 | [0025](0025-trials-registered-before-they-run.md) | 试验先在仓库登记、所有者合并后才能跑；每张试验卡只跑一次 |
 | [0026](0026-controls-first-stricter-selection.md) | 选第一个确认检验之前先做阳性对照；选择规则收紧；成本按吃单；尽早开始前向计时 |
-| [0027](0027-no-api-recording-forward-from-archives.md) | 不从 Binance 交易接口录数据；前向数据先用公开归档的月度文件；实盘的交易场所和数据到 G7 之前一起定 |
+| [0027](0027-api-recording-in-tokyo.md) | Binance 交易接口的数据在谷歌云东京区录；研究的前向数据先用公开归档；实盘之前用自己录的数据重新估计和验证 |
