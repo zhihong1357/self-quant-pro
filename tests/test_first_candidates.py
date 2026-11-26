@@ -451,12 +451,22 @@ def test_dirty_data_is_counted_and_survived(flat):
     json.dumps(outcome.metrics, allow_nan=False)
 
 
-def test_too_few_periods_give_no_summary_and_fail_instead_of_crashing(flat):
+def test_too_few_periods_to_judge_are_an_error_not_a_verdict(flat):
+    """A run that could not be estimated must not look like a candidate that failed:
+    the public log would only say "不通过" (Gemini's third review). A comparison that is
+    only reported may simply have no summary."""
     tiny = {**synthetic(PLANNED_B), "start": "2023-12-27", "end": "2023-12-30"}
-    outcome = fc.evaluate(flat[0], None, tiny)
-    assert outcome.metrics["estimate"]["taker"] is None
-    assert outcome.verdict == "不通过"
-    assert list(outcome.sections) == list(SECTIONS)
+    with pytest.raises(ValueError, match="不到 4 期"):
+        fc.evaluate(flat[0], None, tiny)
+    three = pl.DataFrame({"time": [utc(2021, 1, d) for d in (1, 2, 3)], "net": [0.1] * 3})
+    assert fc.summary(three, 365) is None
+
+
+def test_the_report_says_how_much_dirty_data_there_was(flat):
+    outcome = fc.evaluate(*flat, synthetic(PLANNED_A))
+    assert "遇到的脏数据：丢掉 K 线 0 根、资金费记录 0 条" in outcome.sections["数据"]
+    b = fc.evaluate(flat[0], None, synthetic(PLANNED_B))
+    assert b.sections["数据"].endswith("遇到的脏数据：丢掉 K 线 0 根。")
 
 
 def test_an_unknown_candidate_is_an_error(flat):
@@ -508,3 +518,17 @@ def test_the_planned_windows():
     assert (b[0], b[-1]) == (utc(2020, 1, 1), utc(2024, 1, 31))
     first_liquidity = fc.day(PLANNED_A["start"]) - fc.day(PLANNED_A["read_from"])
     assert first_liquidity >= timedelta(days=PLANNED_A["liquidity_min_days"])
+
+
+def test_the_registered_cards_carry_the_reviewed_parameters():
+    """T-0004 and T-0005 must run exactly what was reviewed: PLANNED_A and PLANNED_B."""
+    from pathlib import Path
+
+    from sqp.research import trials
+
+    text = (Path(__file__).resolve().parents[1] / trials.TRIALS).read_text("utf-8")
+    cards = {t.hypothesis: t for t in trials.parse(text) if t.study == "first_candidates"}
+    assert set(cards) == {"H-0002", "H-0003"}
+    assert dict(cards["H-0002"].params) == PLANNED_A
+    assert dict(cards["H-0003"].params) == PLANNED_B
+    assert all(t.segment == "exploration" and not t.repeat_of for t in cards.values())
