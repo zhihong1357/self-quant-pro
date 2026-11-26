@@ -210,6 +210,21 @@ def run(pit, params):
         rows = pit.table("um-klines-1h", end=end).height
     if mode == "short":
         full.pop("稳健性")
+    if mode == "verdict":
+        return Outcome(metrics={"rows": rows}, sections=full, verdict=params["word"])
+    if mode == "sneaky":
+        class Sneaky(str):  # passes a membership test, prints something else
+            def __eq__(self, other):
+                return other == "通过"
+
+            __hash__ = str.__hash__
+
+            def __str__(self):
+                return "SHARPE=3.14"
+
+        return Outcome(metrics={}, sections=full, verdict=Sneaky("通过"))
+    if mode == "named":
+        raise type("S3_14", (ValueError,), {"__module__": "builtins"})("x")
     return Outcome(metrics={"rows": rows}, sections=full)
 """
 
@@ -510,3 +525,57 @@ def test_a_repeat_waits_until_its_original_has_finished(repo, lake, studies):
     with pytest.raises(ValueError):
         run.run_trial(repo, lake, "T-0001", package=studies)
     assert run.pending(repo, lake) == []  # T-0002 can never run; it must not fail every day
+
+
+# --- verdicts and test counts (decision 0026) ---------------------------------
+
+
+def test_a_verdict_from_the_list_is_printed(repo, lake, studies):
+    register(repo, trial(params={"mode": "verdict", "word": "通过"}))
+    done = run.run_trial(repo, lake, "T-0001", package=studies)
+    assert "判定：通过" in done.lines
+    assert json.loads(lake.get(run.completed_key("T-0001")))["verdict"] == "通过"
+
+
+def test_any_other_verdict_is_an_error_and_never_echoed(repo, lake, studies):
+    register(repo, trial(params={"mode": "verdict", "word": "夏普 3.14"}))
+    with pytest.raises(ValueError) as error:
+        run.run_trial(repo, lake, "T-0001", package=studies)
+    assert "3.14" not in str(error.value)
+
+
+def test_a_verdict_that_only_looks_like_one_from_the_list_is_an_error(repo, lake, studies):
+    register(repo, trial(params={"mode": "sneaky"}))
+    with pytest.raises(ValueError) as error:
+        run.run_trial(repo, lake, "T-0001", package=studies)
+    assert "3.14" not in str(error.value)
+
+
+def test_an_error_type_made_by_the_study_is_not_named_in_the_log(
+    repo, lake, studies, capsys, monkeypatch
+):
+    import functools
+
+    from sqp import cli
+
+    register(repo, trial(params={"mode": "named"}))
+    monkeypatch.setattr(run, "run_trial", functools.partial(run.run_trial, package=studies))
+    code = cli.main(["trial", "run", "--repo", str(repo), "--local", str(lake.root)])
+    out = capsys.readouterr().out
+    assert code == 1 and "S3_14" not in out and "名字不打印" in out
+
+
+def test_a_card_with_several_tests_counts_several_times():
+    def read(path: str) -> str | None:
+        return {
+            "registry/hypotheses/H-0001.toml": card_text("H-0001", universe="U1"),
+            "registry/universes/U1.toml": 'domain = "crypto"\n',
+            trials.INHERITED: json.dumps({"summary": {"counted_by_domain": {"crypto": 9}}}),
+        }.get(path)
+
+    assert trials.counted(ledger_text(trial(tests=4), trial()), read, "U1") == 9 + 5
+
+
+@pytest.mark.parametrize("value", [0, -1, 1.5, True, "2"])
+def test_tests_must_be_a_whole_number_of_at_least_one(cards, value):
+    assert any("tests" in m for m in card_problems(cards, trial(tests=value)))

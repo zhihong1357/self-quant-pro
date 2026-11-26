@@ -9,9 +9,10 @@ in the private bucket (decision 0011).
      "segment": "exploration", "params": {...}, "note": "why this trial"}
 
 Optional keys: "approval" (the seq of the owner's vault approval; required for the
-vault segment) and "repeat_of" (an earlier exploration or synthetic trial run again
-to show its fingerprints are reproducible). A repeat counts like any other trial:
-over-counting is allowed, under-counting is not.
+vault segment), "repeat_of" (an earlier exploration or synthetic trial run again
+to show its fingerprints are reproducible) and "tests" (how many tests one run holds,
+such as the arms of a control; the card counts that many times, at least once). A
+repeat counts like any other trial: over-counting is allowed, under-counting is not.
 
 Rules about the ledger as a whole (one confirmation per hypothesis, what a repeat
 may point to) apply to every card. Rules that look at other files (the study code
@@ -41,7 +42,7 @@ HYPOTHESIS = re.compile(r"^H-\d{4}$")
 STUDY = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 TRIAL_ID = re.compile(r"^T-\d{4,}$")
 KEYS = frozenset({"type", "hypothesis", "study", "segment", "params", "note"})
-OPTIONAL = frozenset({"approval", "repeat_of"})
+OPTIONAL = frozenset({"approval", "repeat_of", "tests"})
 LEDGER_KEYS = frozenset({"seq", "prev", "at", "hash"})
 
 
@@ -160,6 +161,9 @@ def problems(
             if hypothesis in confirmed:
                 bad(f"{hypothesis} 已经有确认检验 {confirmed[hypothesis]}：每个假说只做一次")
             confirmed.setdefault(hypothesis, tid)
+        tests = record.get("tests", 1)
+        if not (isinstance(tests, int) and not isinstance(tests, bool) and tests >= 1):
+            bad("tests 必须是不小于 1 的整数")
         if "approval" in record and segment != "vault":
             bad("只有金库段的试验才写 approval")
         if "repeat_of" in record:
@@ -215,7 +219,9 @@ def counted(text: str, read: Callable[[str], str | None], universe: str) -> int:
         if trial.segment == "synthetic":
             continue
         card = _card(read, trial.hypothesis) or {}
-        own += card.get("universe") == universe
+        if card.get("universe") == universe:
+            tests = trial.record.get("tests", 1)
+            own += tests if isinstance(tests, int) and tests >= 1 else 1
     universe_card = tomllib.loads(read(f"registry/universes/{universe}.toml") or "")
     inherited = json.loads(read(INHERITED) or "{}")
     by_domain = inherited.get("summary", {}).get("counted_by_domain", {})

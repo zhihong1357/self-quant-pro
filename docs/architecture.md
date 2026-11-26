@@ -34,7 +34,7 @@ G0 只有治理层。其余各层按[路线图](roadmap.md)逐个阶段加入，
 | `tests/` | 测试，含 G0 验收测试 `test_acceptance.py` |
 | `.github/` | 持续集成、PR 模板、手动触发的环境自检 `env-check.yml`、每周的数据同步 `data-sync.yml`、手动触发的探索集画像 `profile.yml` |
 
-G2 起：`src/sqp/research/` 是研究运行框架：`trials.py` 读和检查试验卡，`run.py` 跑一张卡，`studies/` 放研究代码（决策 0025）；工作流 `trial.yml` 在 main 上跑已登记的卡。
+G2 起：`src/sqp/research/` 是研究运行框架：`trials.py` 读和检查试验卡，`run.py` 跑一张卡，`engine.py` 是横截面组合的引擎（纯计算，研究代码可以调用），`studies/` 放研究代码（决策 0025、0026）；工作流 `trial.yml` 在 main 上跑已登记的卡。
 
 计划：`src/sqp/model/` 与 `src/sqp/capacity/`（G4）、`deploy/`（G5）、`src/sqp/execution/`（G7）。
 

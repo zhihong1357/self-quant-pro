@@ -2,8 +2,9 @@
 
     def run(pit: PointInTime | None, params: dict) -> Outcome
 
-`pit` is None for studies on synthetic data. A study returns its metrics and the
-text of the nine sections of the standard report (protocol section 9); the runner
+`pit` is None for studies on synthetic data. A study returns its metrics, the text
+of the nine sections of the standard report (protocol section 9) and, optionally, a
+verdict from VERDICTS for the public log; the runner
 adds the facts it knows itself (code commit, data fingerprint, trial count) and
 stores everything in the private bucket. Metrics must be deterministic for the
 same code and inputs: no timestamps, and round floats.
@@ -28,7 +29,15 @@ SECTIONS = (
 )
 
 
+# The only words a study may send to the public log (decision 0026). Logs are public,
+# so a study's numbers never go there; a verdict from this short list carries a bit
+# or two and lets the owner and agents see whether a control passed without
+# downloading anything.
+VERDICTS = ("通过", "不通过", "一致", "不一致")
+
+
 @dataclass(frozen=True)
 class Outcome:
     metrics: dict  # name -> number, string, bool or None; stays in the private bucket
     sections: dict  # every name in SECTIONS -> text; "不适用：…" is a valid text
+    verdict: str | None = None  # one of VERDICTS, printed in the public log

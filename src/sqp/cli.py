@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import builtins
 import json
 import secrets
 import sys
@@ -16,7 +17,7 @@ from pathlib import Path
 from sqp import inherit, ledger, stats, storage
 from sqp.checks import run_all
 from sqp.data import build, gen1, profile, vision
-from sqp.data.pit import PointInTime
+from sqp.data.pit import AccessRefused, IntegrityError, PointInTime
 from sqp.repo import GitError, Repo
 from sqp.research import run
 
@@ -234,6 +235,15 @@ def _trial_run(args: argparse.Namespace) -> int:
     return 1 if failed else 0
 
 
+def _error_name(exc: BaseException) -> str:
+    """The error's type if it is a built-in one or one of the data layer's. A type made
+    by study code is not named: its name could be built from data (type("S3.14", ...))."""
+    kind = type(exc)
+    if getattr(builtins, kind.__name__, None) is kind or kind in (AccessRefused, IntegrityError):
+        return kind.__name__
+    return "研究代码自己定义的错误类型（名字不打印）"
+
+
 def _run_one(root: Path, store: storage.Store, tid: str) -> int:
     """Run one card and print only names and fingerprints; 1 if it did not finish cleanly."""
     try:
@@ -242,7 +252,7 @@ def _run_one(root: Path, store: storage.Store, tid: str) -> int:
         print(f"{tid} 拒绝：{exc}")
         return 1
     except Exception as exc:  # only the type: a message may carry numbers (decision 0011)
-        print(f"{tid} 出错：{type(exc).__name__}。这次已开始，计入试验次数（决策 0025）")
+        print(f"{tid} 出错：{_error_name(exc)}。这次已开始，计入试验次数（决策 0025）")
         for frame in traceback.extract_tb(exc.__traceback__):  # where, never the values
             print(f"  {frame.filename}:{frame.lineno} {frame.name}")
         return 1

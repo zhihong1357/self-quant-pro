@@ -36,7 +36,7 @@ from pathlib import Path
 from sqp import ledger
 from sqp.data.pit import PointInTime, _git, _on_main, _running_main_in_actions
 from sqp.research import trials
-from sqp.research.studies import SECTIONS
+from sqp.research.studies import SECTIONS, VERDICTS
 from sqp.storage import ObjectExists, Store
 
 PACKAGE = "sqp.research.studies"
@@ -125,15 +125,22 @@ def _report(trial: trials.Trial, card: dict, sections: dict, facts: dict) -> byt
     return "\n".join(lines).encode()
 
 
-def _outcome(result: object) -> tuple[dict, dict]:
+def _outcome(result: object) -> tuple[dict, dict, str | None]:
     metrics = getattr(result, "metrics", None)
     sections = getattr(result, "sections", None)
+    verdict = getattr(result, "verdict", None)
     if not isinstance(metrics, dict) or not isinstance(sections, dict):
         raise TypeError("研究代码必须返回 Outcome(metrics=dict, sections=dict)")
     missing = [s for s in SECTIONS if not str(sections.get(s, "")).strip()]
     if missing:
         raise ValueError(f"标准报告缺少章节：{'、'.join(missing)}（不适用就写明“不适用”和原因）")
-    return metrics, sections
+    if verdict is not None:
+        # Exactly a str, then replaced by our own copy: a str subclass could pass the
+        # membership test with its own __eq__ and print anything (logs are public).
+        if type(verdict) is not str or verdict not in VERDICTS:
+            raise ValueError(f"判定只能是 {'、'.join(VERDICTS)} 之一")  # never echo it
+        verdict = VERDICTS[VERDICTS.index(verdict)]
+    return metrics, sections, verdict
 
 
 def run_trial(
@@ -189,7 +196,7 @@ def run_trial(
     try:
         study = importlib.import_module(f"{package}.{trial.study}")
         with contextlib.redirect_stdout(console), contextlib.redirect_stderr(console):
-            metrics, sections = _outcome(study.run(pit, params))
+            metrics, sections, verdict = _outcome(study.run(pit, params))
         inputs = dict(pit.inputs) if pit is not None else {}
         # allow_nan=False: NaN and Infinity are not JSON; a study must say what it means
         result = json.dumps(
@@ -223,6 +230,7 @@ def run_trial(
         "inputs_sha256": facts["inputs_sha256"],
         "result_sha256": _sha(result),
         "report_sha256": _sha(report),
+        "verdict": verdict,
         "at": _now(),
         **_run_info(),
     }
@@ -236,6 +244,8 @@ def run_trial(
         f"指纹：输入 {completed['inputs_sha256']}；结果 {completed['result_sha256']}；"
         f"报告 {completed['report_sha256']}",
     ]
+    if verdict is not None:
+        done.lines.append(f"判定：{verdict}")
     if trial.repeat_of:
         original = json.loads(store.get(completed_key(trial.repeat_of)))
         same = all(original[k] == completed[k] for k in ("inputs_sha256", "result_sha256"))

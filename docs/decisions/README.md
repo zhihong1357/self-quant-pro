@@ -29,3 +29,4 @@
 | [0023](0023-g1-accepted.md) | G1 验收，STAGE 进入 G2；三项未完成的交付移到 G2 |
 | [0024](0024-import-gen1-recordings.md) | 每天导入第一代的录制数据；只读令牌放在只许 main 使用的环境里 |
 | [0025](0025-trials-registered-before-they-run.md) | 试验先在仓库登记、所有者合并后才能跑；每张试验卡只跑一次 |
+| [0026](0026-controls-first-stricter-selection.md) | 选第一个确认检验之前先做阳性对照；选择规则收紧；成本按吃单；尽早开始前向计时 |

@@ -45,6 +45,7 @@ def test_the_registered_card_reproduces_the_second_generation():
     assert m["gen2_pairs"] == m["pairs"] and m["gen2_abs_diff"] < 1e-9
     assert list(outcome.sections) == list(SECTIONS)
     assert "：一致。" in outcome.sections["结论"]
+    assert outcome.verdict == "一致"
 
 
 def test_the_repeat_card_is_the_same_trial():
@@ -79,6 +80,7 @@ def test_the_clock_limit_decides_the_last_decision():
 def test_a_gap_from_the_second_generation_is_reported_as_inconsistent():
     outcome = thin_slice.run(None, {**params(), "gen2_corr_pit": 0.36})
     assert "不一致，需要排查" in outcome.sections["结论"]
+    assert outcome.verdict == "不一致"
 
 
 def test_without_a_second_generation_value_it_still_runs():

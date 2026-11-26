@@ -72,6 +72,7 @@ ALLOWED_MODULES = frozenset(
 SQP_NAMES: dict[str, frozenset[str] | None] = {
     "sqp.data.pit": frozenset({"PointInTime", "AccessRefused", "IntegrityError", "Segment"}),
     "sqp.stats": None,  # functions and classes only: constants carry no __module__
+    "sqp.research.engine": None,  # the cross-sectional engine: pure functions, no I/O
     PACKAGE: frozenset({"Outcome", "SECTIONS"}),  # the study conventions
 }
 # Built-ins that open files, run strings as code, or reach attributes by name.
@@ -102,6 +103,7 @@ OTHER_NAMES = frozenset(
     {
         "sql",
         "sql_expr",
+        "Config",  # polars' verbose mode prints from Rust, past the console capture
         "SQLContext",
         "plugins",
         "register_plugin_function",
