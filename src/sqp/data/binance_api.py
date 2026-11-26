@@ -229,7 +229,7 @@ class Lines:
     kept as text it ran the 1 GiB job out of memory (2026-11-26)."""
 
     def __init__(self) -> None:
-        self._buffer = io.BytesIO()
+        self._buffer: io.BytesIO | None = io.BytesIO()
         self._gzip = gzip.GzipFile(fileobj=self._buffer, mode="wb", mtime=0)
         self._count = 0
 
@@ -249,9 +249,13 @@ class Lines:
         return self._count
 
     def finish(self) -> bytes:
-        """The gzip'd bytes, once; the buffer is let go."""
+        """The gzip'd bytes, exactly once: a second call would otherwise store nothing."""
+        if self._buffer is None:
+            raise RuntimeError("Lines.finish() called twice")
         self._gzip.close()
-        data, self._buffer = self._buffer.getvalue(), io.BytesIO()
+        data = self._buffer.getvalue()
+        self._buffer.close()
+        self._buffer = None
         return data
 
 

@@ -91,9 +91,11 @@ say "Cloud Run 任务 ${JOB}（东京区）"
 # No retries: a 418 (banned) must stop at once, and anything else is picked up by the
 # next day's run, which continues from where the last one stopped. Cloud Run imports the
 # image when the job is deployed, so the daily runs do not pull from Docker Hub.
+# 2 GiB: the installed environment (~200 MB) lives in memory too, and the first run
+# went out of memory at 1 GiB before lines were compressed as they arrive.
 gcloud run jobs deploy "$JOB" --project="$PROJECT_ID" --region="$REGION" --image="$IMAGE" \
   --service-account="$SA" --command=python --args="-c,${CODE}" \
-  --tasks=1 --cpu=1 --memory=1Gi --task-timeout=3600s --max-retries=0 --quiet
+  --tasks=1 --cpu=1 --memory=2Gi --task-timeout=3600s --max-retries=0 --quiet
 
 say "允许定时器启动这个任务"
 gcloud run jobs add-iam-policy-binding "$JOB" --project="$PROJECT_ID" --region="$REGION" \

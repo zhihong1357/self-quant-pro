@@ -201,6 +201,15 @@ def test_the_next_run_continues_exactly_where_the_last_stopped(tmp_path):
     assert {b % (H // 2) for b in bars} == {0}  # every bar on the half hour
 
 
+def test_lines_are_one_gzip_stream_and_finish_only_once():
+    lines = api.Lines.of([{"a": "é"}, {"b": 2}])
+    assert len(lines) == 2
+    assert gzip.decompress(lines.finish()) == '{"a": "é"}\n{"b": 2}\n'.encode()
+    with pytest.raises(RuntimeError):
+        lines.finish()
+    assert gzip.decompress(api.Lines().finish()) == b""
+
+
 def test_a_first_run_holds_its_month_compressed_not_as_text(tmp_path):
     import tracemalloc
 
