@@ -466,12 +466,12 @@ def blind_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _blind_lake_templ
     return root, store, ref, ref_bytes
 
 
-def _code_sha256(
-    root: Path, study: str = "btc_eth_001", *, include_stats: bool = False
-) -> dict[str, str]:
-    paths = [f"src/sqp/research/studies/{study}.py", "src/sqp/research/blind.py"]
-    if include_stats:
-        paths.append("src/sqp/stats.py")
+def _code_sha256(root: Path, study: str = "btc_eth_001") -> dict[str, str]:
+    paths = [
+        f"src/sqp/research/studies/{study}.py",
+        "src/sqp/research/blind.py",
+        "src/sqp/stats.py",
+    ]
     return {p: hashlib.sha256((root / p).read_bytes()).hexdigest() for p in paths}
 
 
@@ -601,6 +601,7 @@ def test_static_burned_family_guards_and_four_locks(sandbox):
     )
     sandbox.write("src/sqp/research/studies/btc_eth_001.py", "x = 1\n")
     sandbox.write("src/sqp/research/blind.py", (ROOT / "src/sqp/research/blind.py").read_text())
+    sandbox.write("src/sqp/stats.py", (ROOT / "src/sqp/stats.py").read_text())
     sandbox.write(APPROVALS, "")
     sandbox.write(trials.TRIALS, "")
     base = sandbox.commit("base")
@@ -747,6 +748,7 @@ def test_static_blind_min_tests_three_segments_and_redo_decision(sandbox):
     )
     sandbox.write("src/sqp/research/studies/btc_eth_001.py", "x = 1\n")
     sandbox.write("src/sqp/research/blind.py", (ROOT / "src/sqp/research/blind.py").read_text())
+    sandbox.write("src/sqp/stats.py", (ROOT / "src/sqp/stats.py").read_text())
     sandbox.write(APPROVALS, "")
     sandbox.write(trials.TRIALS, "")
     base = sandbox.commit("base")

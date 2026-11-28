@@ -271,6 +271,14 @@ KNOWN_ESCAPE_CORPUS = [
         "polars_show_graph",
         'import polars as pl\ndef run(pit, p):\n    pl.LazyFrame().show_graph(output_path="x")\n',
     ),
+    (
+        "polars_credential_provider_gcp",
+        "import polars as pl\ndef run(pit, p):\n    return pl.CredentialProviderGCP()()\n",
+    ),
+    (
+        "polars_catalog",
+        'import polars as pl\ndef run(pit, p):\n    return pl.Catalog("https://example.test")\n',
+    ),
 ]
 
 

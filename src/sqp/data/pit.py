@@ -136,18 +136,17 @@ def approval_code_sha256_problems(record: dict, study: str | None = None) -> lis
     """Validate the `code_sha256` mapping on a blind_replication vault approval (L4)."""
     raw = record.get("code_sha256")
     if type(raw) is not dict:
-        return ["盲复现批准必须写明 code_sha256（锁定研究代码与 blind.py 的 SHA-256）"]
+        return ["盲复现批准必须写明 code_sha256（锁定研究代码、blind.py 与 stats.py 的 SHA-256）"]
     found: list[str] = []
     if study:
         study_path = f"src/sqp/research/studies/{study}.py"
-        required = {study_path, BLIND_CODE_FILE}
-        allowed = required | {STATS_CODE_FILE}
+        required = {study_path, BLIND_CODE_FILE, STATS_CODE_FILE}
         keys = set(raw)
         if missing := sorted(required - keys):
             found.append(f"盲复现批准的 code_sha256 缺少必填文件：{', '.join(missing)}")
-        if extra := sorted(keys - allowed):
+        if extra := sorted(keys - required):
             found.append(
-                "盲复现批准的 code_sha256 只能锁定研究代码与 blind.py（可选 stats.py），"
+                "盲复现批准的 code_sha256 只能锁定研究代码、blind.py 与 stats.py，"
                 f"不能包含：{', '.join(extra)}"
             )
     for path, digest in raw.items():
