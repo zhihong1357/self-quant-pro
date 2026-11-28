@@ -28,9 +28,9 @@ import re
 import tomllib
 from collections.abc import Callable, Container
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, time, timedelta
 
 from sqp import ledger
+from sqp.data.pit import burned_cutoff, find_vault_approval, parse_iso_utc
 from sqp.research import blind
 
 TRIALS = "registry/ledger/trials.jsonl"
@@ -44,8 +44,19 @@ READABLE_STATUSES = frozenset({"registered", "confirmed"})  # as in sqp.data.pit
 HYPOTHESIS = re.compile(r"^H-\d{4}$")
 STUDY = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 TRIAL_ID = re.compile(r"^T-\d{4,}$")
+DECISION_PATH = re.compile(r"^docs/decisions/\d{4}-[a-z0-9-]+\.md$")
 KEYS = frozenset({"type", "hypothesis", "study", "segment", "params", "note"})
-OPTIONAL = frozenset({"approval", "repeat_of", "tests", "mode", "max_knowable_time", "inherited"})
+OPTIONAL = frozenset(
+    {
+        "approval",
+        "repeat_of",
+        "tests",
+        "mode",
+        "max_knowable_time",
+        "inherited",
+        "redo_decision",
+    }
+)
 LEDGER_KEYS = frozenset({"seq", "prev", "at", "hash"})
 
 
@@ -108,25 +119,13 @@ def parse(text: str) -> list[Trial]:
     return trials
 
 
-def _parse_iso_utc(raw: object) -> datetime | None:
-    if not isinstance(raw, str) or not raw.strip():
-        return None
-    try:
-        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if dt.tzinfo is None or dt.utcoffset() is None:
-        return None
-    return dt.astimezone(UTC)
-
-
 def _valid_inherited_dict(raw: object) -> bool:
     return (
         isinstance(raw, dict)
         and set(raw) == {"source", "path"}
-        and isinstance(raw.get("source"), str)
+        and type(raw.get("source")) is str
         and bool(raw["source"].strip())
-        and isinstance(raw.get("path"), str)
+        and type(raw.get("path")) is str
         and bool(raw["path"].strip())
     )
 
@@ -184,32 +183,11 @@ def approval_problems(approvals: str) -> list[str]:
         elif mode == "blind_replication":
             if not (isinstance(record.get("study"), str) and STUDY.match(record["study"])):
                 found.append(f"{prefix}：盲复现批准必须写明合法的 study")
-            if _parse_iso_utc(record.get("max_knowable_time")) is None:
+            if parse_iso_utc(record.get("max_knowable_time")) is None:
                 found.append(f"{prefix}：盲复现批准必须写明带 UTC 时区的 max_knowable_time")
             if not _valid_inherited_dict(record.get("inherited")):
                 found.append(f"{prefix}：盲复现批准必须写明 inherited（含 source 和 path）")
     return found
-
-
-def _find_approval(
-    approvals: str, seq: object, universe: str, hypothesis: str, tid: str
-) -> dict | None:
-    if isinstance(seq, bool) or not isinstance(seq, int) or seq < 1:
-        return None
-    if not approvals.strip() or ledger.verify(approvals):
-        return None  # a broken chain approves nothing, as in sqp.data.pit
-    for line in approvals.splitlines():
-        record = json.loads(line)
-        if record.get("seq") == seq:
-            if (
-                record.get("type") == "vault"
-                and record.get("universe") == universe
-                and record.get("hypothesis") == hypothesis
-                and record.get("trial") == tid
-            ):
-                return record
-            return None
-    return None
 
 
 def problems(
@@ -225,6 +203,7 @@ def problems(
     seen: dict[str, Trial] = {}
     confirmed: dict[str, str] = {}
     used_approvals: dict[int, str] = {}
+    blind_refs: dict[tuple[str, str], str] = {}
     approvals = read(APPROVALS) or ""
     for line in text.splitlines():
         try:
@@ -285,15 +264,31 @@ def problems(
                 bad("盲复现试验卡必须写 approval")
             if "repeat_of" in record:
                 bad("盲复现试验卡不能设置 repeat_of")
-            if _parse_iso_utc(record.get("max_knowable_time")) is None:
+            if parse_iso_utc(record.get("max_knowable_time")) is None:
                 bad("盲复现试验卡必须写带 UTC 时区的 max_knowable_time")
-            if not _valid_inherited_dict(record.get("inherited")):
+            inherited = record.get("inherited")
+            if not _valid_inherited_dict(inherited):
                 bad("盲复现试验卡必须写 inherited（含 source 和 path）")
+            elif isinstance(inherited, dict):
+                ref_key = (inherited["source"], inherited["path"])
+                redo = record.get("redo_decision")
+                if ref_key in blind_refs:
+                    if not (isinstance(redo, str) and DECISION_PATH.match(redo)):
+                        bad(
+                            f"同一对照基线已有盲复现卡 {blind_refs[ref_key]}，"
+                            "再次提交必须写 redo_decision 指向说明原因的决策记录"
+                        )
+                else:
+                    if "redo_decision" in record:
+                        bad("首次盲复现该对照基线不需要写 redo_decision")
+                    blind_refs[ref_key] = tid
         else:
             if "max_knowable_time" in record:
                 bad("只有盲复现模式（mode=blind_replication）才写 max_knowable_time")
             if "inherited" in record:
                 bad("只有盲复现模式（mode=blind_replication）才写 inherited")
+            if "redo_decision" in record:
+                bad("只有盲复现模式（mode=blind_replication）才写 redo_decision")
         if "repeat_of" in record:
             original = seen.get(record["repeat_of"])
             if original is None:
@@ -326,8 +321,8 @@ def _runnable(
     family = card.get("family")
     if (universe == "synthetic") != (segment == "synthetic"):
         found.append("合成数据的假说只能用 synthetic 段，真实数据的假说不能用 synthetic 段")
+    planned = (card.get("registration") or {}).get("segments") or []
     if segment in GUARDED:
-        planned = (card.get("registration") or {}).get("segments") or []
         if card.get("status") not in READABLE_STATUSES:
             found.append(
                 f"读 {segment} 段需要状态为 registered 或 confirmed 的假说，"
@@ -349,9 +344,20 @@ def _runnable(
             )
         elif family in vault_burned and segment == "vault":
             found.append(f"假说族 {family} 已在 {universe} 的 vault_burned 中，不能再读金库段")
+        elif (
+            segment == "forward"
+            and (family in families_burned or family in vault_burned)
+            and burned_cutoff(exposure) is None
+        ):
+            found.append(
+                f"{universe} 缺少合法的 exposure.burned_through，"
+                f"无法核对已烧毁族 {family} 的前向起点"
+            )
 
     if segment == "vault":
-        ap_rec = _find_approval(approvals, record.get("approval"), str(universe), hypothesis, tid)
+        ap_rec = find_vault_approval(
+            approvals, record.get("approval"), str(universe), hypothesis, tid
+        )
         if ap_rec is None:
             found.append(
                 "读金库段要写 approval：所有者已合并批准记录的 seq"
@@ -362,8 +368,8 @@ def _runnable(
                 f"批准记录的 mode 为 {ap_rec.get('mode', 'standard')!r}，与试验卡 {mode!r} 不一致"
             )
         elif mode == "blind_replication":
-            ap_limit = _parse_iso_utc(ap_rec.get("max_knowable_time"))
-            card_limit = _parse_iso_utc(record.get("max_knowable_time"))
+            ap_limit = parse_iso_utc(ap_rec.get("max_knowable_time"))
+            card_limit = parse_iso_utc(record.get("max_knowable_time"))
             if (
                 ap_rec.get("study") != study
                 or ap_limit != card_limit
@@ -374,31 +380,50 @@ def _runnable(
                 )
 
     if mode == "blind_replication":
-        if study not in blind.COMPARATORS:
+        missing_segs = [s for s in ("confirmation", "vault", "forward") if s not in planned]
+        if missing_segs:
+            found.append(
+                f"盲复现会跨段读取，{hypothesis} 注册时必须计划全部受保护段"
+                f"（缺少 {'、'.join(missing_segs)}）"
+            )
+        spec = blind.COMPARATOR_SPECS.get(study)
+        if spec is None:
             found.append(f"盲复现研究 {study!r} 没有在 sqp.research.blind 中注册比对器")
+        else:
+            tests = record.get("tests", 1)
+            if type(tests) is int and tests < spec.min_tests:
+                found.append(f"盲复现研究 {study} 的试验次数 tests 至少为 {spec.min_tests}")
         if family not in families_burned:
             found.append(
                 f"假说族 {family!r} 不在 {universe} 的 families_burned 中，不能走盲复现通道"
             )
-        through = exposure.get("burned_through")
-        card_limit = _parse_iso_utc(record.get("max_knowable_time"))
-        if not isinstance(through, date):
+        cutoff = burned_cutoff(exposure)
+        card_limit = parse_iso_utc(record.get("max_knowable_time"))
+        if cutoff is None:
             found.append(f"{universe} 缺少合法的 exposure.burned_through，不能走盲复现通道")
-        elif card_limit is not None:
-            cutoff = datetime.combine(through + timedelta(days=1), time(), tzinfo=UTC)
-            if card_limit >= cutoff:
-                found.append(
-                    f"盲复现 max_knowable_time ({record.get('max_knowable_time')}) "
-                    f"超过了 burned_through ({through})"
-                )
+        elif card_limit is not None and card_limit >= cutoff:
+            through = exposure.get("burned_through")
+            found.append(
+                f"盲复现 max_knowable_time ({record.get('max_knowable_time')}) "
+                f"超过了 burned_through ({through})"
+            )
+        if spec is not None:
+            found.extend(
+                blind.validate_params(study, record.get("params"), max_knowable_time=card_limit)
+            )
         inherited = record.get("inherited")
-        if _valid_inherited_dict(inherited):
-            assert isinstance(inherited, dict)
-            if blind.manifest_entry(read, inherited["source"], inherited["path"]) is None:
-                found.append(
-                    f"盲复现引用的继承基线 {inherited['source']}/{inherited['path']} "
-                    "不在 registry/inherited/manifest.json 中"
-                )
+        if (
+            isinstance(inherited, dict)
+            and _valid_inherited_dict(inherited)
+            and blind.manifest_entry(read, inherited["source"], inherited["path"]) is None
+        ):
+            found.append(
+                f"盲复现引用的继承基线 {inherited['source']}/{inherited['path']} "
+                "不在 registry/inherited/manifest.json 中"
+            )
+        redo = record.get("redo_decision")
+        if isinstance(redo, str) and DECISION_PATH.match(redo) and read(redo) is None:
+            found.append(f"redo_decision 指向的决策记录不存在：{redo}")
     return found
 
 

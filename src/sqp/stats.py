@@ -223,13 +223,17 @@ def _qr_solve(design: list[list[float]], y: list[float]) -> tuple[list[float], l
     n = len(y)
     k = len(design[0])
     cols = [[design[i][j] for i in range(n)] for j in range(k)]
+    max_col_norm = max(math.sqrt(sum(v * v for v in col)) for col in cols)
+    if max_col_norm == 0.0:
+        raise ValueError("设计矩阵全为零")
+    tol = 1e-12 * max_col_norm
     qty = list(y)
 
     for j in range(k):
         col_j = cols[j]
         norm_sq = sum(col_j[i] * col_j[i] for i in range(j, n))
         norm = math.sqrt(norm_sq)
-        if norm < 1e-12:
+        if norm <= tol:
             raise ValueError("设计矩阵秩不足或共线")
         sign = 1.0 if col_j[j] >= 0.0 else -1.0
         u0 = col_j[j] + sign * norm
@@ -252,9 +256,10 @@ def _qr_solve(design: list[list[float]], y: list[float]) -> tuple[list[float], l
         for i in range(j, n):
             qty[i] -= scale_y * v[i - j]
 
-    for j in range(k):
-        if abs(cols[j][j]) < 1e-12:
-            raise ValueError("设计矩阵在 QR 分解后奇异")
+    diags = [abs(cols[j][j]) for j in range(k)]
+    min_diag = min(diags)
+    if min_diag <= tol or max(diags) / min_diag > 1e12:
+        raise ValueError("设计矩阵在 QR 分解后奇异或条件数过大")
 
     beta = [0.0] * k
     for i in range(k - 1, -1, -1):
@@ -276,16 +281,14 @@ def _qr_solve(design: list[list[float]], y: list[float]) -> tuple[list[float], l
     return beta, xtx_inv
 
 
-def ols_fit(
-    target: Iterable[float],
-    predictors: Mapping[str, Iterable[float]],
+def _ols_from_design(
+    y: list[float],
+    design: list[list[float]],
+    predictor_names: tuple[str, ...],
+    coefficient_names: tuple[str, ...],
     *,
-    include_intercept: bool = True,
+    include_intercept: bool,
 ) -> OLSResult:
-    """Full-rank OLS using Householder QR (pure Python, deterministic)."""
-    y, design, predictor_names, coefficient_names = _design_matrix(
-        target, predictors, include_intercept=include_intercept
-    )
     n, k = len(y), len(coefficient_names)
     beta, xtx_inv = _qr_solve(design, y)
     residuals = [
@@ -315,6 +318,21 @@ def ols_fit(
     )
 
 
+def ols_fit(
+    target: Iterable[float],
+    predictors: Mapping[str, Iterable[float]],
+    *,
+    include_intercept: bool = True,
+) -> OLSResult:
+    """Full-rank OLS using Householder QR (pure Python, deterministic)."""
+    y, design, predictor_names, coefficient_names = _design_matrix(
+        target, predictors, include_intercept=include_intercept
+    )
+    return _ols_from_design(
+        y, design, predictor_names, coefficient_names, include_intercept=include_intercept
+    )
+
+
 def newey_west_hac(
     target: Iterable[float],
     predictors: Mapping[str, Iterable[float]],
@@ -330,13 +348,15 @@ def newey_west_hac(
     """
     if isinstance(max_lag, bool) or not isinstance(max_lag, int) or max_lag < 0:
         raise ValueError("max_lag 必须是非负整数")
-    y, design, _, coefficient_names = _design_matrix(
+    y, design, predictor_names, coefficient_names = _design_matrix(
         target, predictors, include_intercept=include_intercept
     )
     n, k = len(y), len(coefficient_names)
     if max_lag >= n:
         raise ValueError("max_lag 必须小于样本量")
-    fitted = ols_fit(y, predictors, include_intercept=include_intercept)
+    fitted = _ols_from_design(
+        y, design, predictor_names, coefficient_names, include_intercept=include_intercept
+    )
     scores = [
         [row[j] * res for j in range(k)] for row, res in zip(design, fitted.residuals, strict=True)
     ]
@@ -577,10 +597,14 @@ def circular_block_bootstrap_mean_test(
     if n < 2:
         raise ValueError("自助法至少需要 2 个观测")
     max_block = max(1, n // 2)
-    if block_length < 1 or block_length > max_block:
+    if type(block_length) is not int or block_length < 1 or block_length > max_block:
         raise ValueError(f"block_length 必须在 [1, {max_block}] 内")
-    if resamples < 100 or seed < 0 or not math.isfinite(null_mean):
-        raise ValueError("自助法参数不合法")
+    if type(resamples) is not int or resamples < 100:
+        raise ValueError("resamples 必须是不小于 100 的整数")
+    if type(seed) is not int or seed < 0:
+        raise ValueError("seed 必须是非负整数")
+    if type(null_mean) not in (int, float) or not math.isfinite(null_mean):
+        raise ValueError("null_mean 必须是有限数字")
 
     obs_mean = sum(sample) / n
     centered = [v - obs_mean + null_mean for v in sample]

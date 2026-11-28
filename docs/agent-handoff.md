@@ -2,6 +2,35 @@
 
 每次会话结束时更新这一页：最新的写在最上面，旧的往下推。只写下一个会话需要知道的事。
 
+## 2026-11-28 · Antigravity · G2：按模型 B 终审红队意见全面加固 PR #29（F1–F10、L1–L3/L5–L6、T1–T4）
+
+**进展**
+- 模型 B 对 PR #29（`d07b14e`）做了独立红队终审，给出 20 条发现与 13 个可运行攻击测试（`test_redteam_pr29.py`）：
+  - **阻塞级 2 条（已全部修复）**：
+    - **F10（致命）**：`pit._utc()` 强制校验 `type(t) is datetime` 且 `type(t.tzinfo) is timezone`，拒绝任何改写比较运算的 `datetime` 子类或自定义 `tzinfo`；`research-boundary` 静态禁止研究代码定义双下划线名字（豁免 `studies/__init__.py` 的 `BlindMetrics.__repr__/__str__`）。
+    - **F5（高）**：`research-boundary` 静态禁用 `.format` / `.format_map` 与 `type`；`run.py` 增加独立调用帧 `_invoke_study()`，隔离 `ref_bytes` 与研究代码栈帧，形成双层防护。
+  - **中危 4 条（已全部修复）**：
+    - **F1 / F1b（中）**：`blind.py` 全链路收紧为精确内置类型（`int`/`str`/`bool`/`float`/`dict`），拒绝子类；时间经 `datetime.fromisoformat` 解析为合法 UTC 并校验落在 `[窗口起点, max_knowable_time]` 后重新规范化输出；面板质量计数按窗口天数/小时数/原始 K 线数设物理上限；去掉原始 `observations_binance`，`observations_diff` 截断至允许范围，`delta_se` 封顶至 `9.99`。
+    - **F2（中）**：新增 `ComparatorSpec`、`blind.validate_params()` 和 `blind.validate_reference_bytes()`，在 `trials._runnable`（静态 gate）与 `run.py` 写 `started.json` 之前双重校验参数白名单、门槛只严不松与对照文件结构，防止错误参数烧毁一次性批准。
+    - **F3（中）**：`required_dataset` / `required_symbols` / `required_start_month` / `required_end_month` 在盲复现模式下改为必填，由比对器声明最低覆盖要求（`btc_eth_001` 为 `um-klines-1h`、BTC/ETH/SOL、`2023-01` 至 `2026-11`），并在 `dataset_window_ready` 文档中写明其针对月度归档数据集。
+    - **F6（中，既有）**：`PointInTime._check_burned_exposure()` 在普通模式下强制拦截 `families_burned ∪ vault_burned` 读取 `burned_through`（含当日）之前的前向数据，要求 `start ≥ midnight(burned_through + 1 day)`，自动覆盖 `H-0009`（`crypto.funding`）。
+  - **低危与提示项（顺手一并修复）**：
+    - **F4 / F7 / F9**：共享 `run.error_name()` 供 `failed.json` 和 `cli` 使用（彻底屏蔽动态异常类名，并允许 `URLError`/`HTTPError`/`google.api_core.*` 报真名）；前置检查整体包入 `TrialRefused("前置检查失败，本次未开始、未消耗批准：...")`；盲复现运行出错在公开日志只印一行固定文字（不印错误类与栈帧），普通试验不印 `studies/` 栈帧；`dataset_window_ready` 忽略非对象 `.inputs.json`。
+    - **F8**：`PointInTime` 全生命周期追踪 `_guarded_seen`，即使 `allowed=None` 在非盲复现下也最多允许访问一个受保护段。
+    - **L1 / L2 / L3 / L5 / L6**：写 `started.json` 前增加只读 `check_vault_approval()`，非 `ObjectExists` 写失败提示核对消费标记；`load_reference_bytes()` 缓存损坏时报警并回退至上游 GitHub 拉取；`raw_github_url()` 对路径做百分号编码；同一对照基线第二次盲复现须附 `redo_decision` 指向决策记录；静态强制 `tests >= min_tests`（`btc_eth_001` 为 3）且假说卡 `registration.segments` 须包含全部三个受保护段。
+    - **T1 / T2 / T3 / T4**：`stats._qr_solve` 改用相对容差（`1e-12 * max_col_norm`）与条件数保护（`> 1e12`）；`newey_west_hac` 一次性物化生成器；`circular_block_bootstrap_mean_test` 要求 `seed` 等为精确 `int`；去重 `parse_iso_utc`/`find_vault_approval`/`burned_cutoff`；清除运行时 `assert`；盲复现执行期间重定向底层 fd `1`/`2` 到 `/dev/null`；同步修正决策 0031 表述（去掉“零泄露”夸大说法，修正 `e992b10` 为最早公开提交并注明 `5aae4adb` 不在公开历史中）。
+- **未采纳/延后项（已写明原因）**：
+  - **L4（金库批准绑定研究代码与 `blind.py` 的 SHA-256）**：延后。当前每份金库批准都由所有者在 PR 中和试验卡一并审查合并进 `main`，再由 `main` 上的工作流执行；此时往 `approvals.jsonl` 强制加两项代码哈希会增加维护复杂度（违反规则 13 简单优先）。若未来出现多智能体并发合并导致批准与代码错位，再按需追加。
+- **验证**：先在 `d07b14e` 上跑通模型 B 全部 13 个攻击用例确认漏洞存在；修复后把 13 个用例全部翻转为拒绝回归测试保留在 `tests/test_redteam_pr29.py`，另新增 L1–L3/L5–L6/T1–T2 回归测试；`ruff`、`sqp check --base origin/main`、模拟 `gate / rules`（`main@09ed6c6`）与全套 `pytest` 全绿。
+
+**下一步**
+- 交付《审查包 B-2》供所有者转模型 B 做第二轮快速核对，确认无误后合并 PR #29；
+- PR #29 合并后立即推进 PR #30（`src/sqp/research/studies/btc_eth_001.py` + 合成彩排，按模型 B 第 4 节逐项核对 `label_end = decision_time + 2d`、`holdout_window.start`、`lag_steps=1` 与 16:00 UTC 日线口径）；
+- 等 2026-12 月初 Binance 发布 2026-11 月度归档并同步进存储桶后，开小 PR 提交 `H-0010`、一次性批准与试验卡正式运行，完成迁移验收 A。
+
+**踩到的坑**
+- 在 `run_trial` 把只读 `check_vault_approval` 提前到前置检查时，若不先查 `store.exists(started_key(tid))`，重跑已跑完的试验卡会先报“批准已使用过”而不是“试验卡已经开始过”，且会无谓地触发前置就绪检查与上游拉取。把 `started_key` 存在性检查放在前置最顶部后彻底理顺。
+
 ## 2026-11-27 · Antigravity · G2：东京录制跑通；一次性金库批准与四联锁盲复现框架（决策 0031）
 
 **进展**
@@ -9,7 +38,7 @@
 - 所有者引入“四方流水线”：总控出提示词 → 模型 A 起草《审查包 A》 → 总控对照源码一审挑刺、补充并落地 PR 与《审查包 B》 → 模型 B 独立终审 → 总控修完后合并。
 - 一审模型 A 的《审查包 A》时，对照 `self-quant-pro@09ed6c6` 和 `myquant` 历史提交 `e992b10`/`feb6a07` 源码抓出 7 处关键偏差并全部修正：
   1. 本仓库 `registry/inherited/myquant/research/btc-eth-001/trials.jsonl` 按决策 0011 剥离了数值结果（只有 6 个元数据键），不能直接读；但 `registry/inherited/manifest.json` 已锁定上游完整文件的提交号（`feb6a07`）、字节数（7,918）与 SHA-256。改为框架层按 `manifest.json` 验哈希加载（优先读私有存储缓存 `raw/gen2/...`，离线测试零联网）。
-  2. 核对真正跑出 `btc-eth-001` 的 Python 源码（`myquant@e992b10` 的 `run_trial.py`、`okx.py`、`panel.py`、`lead_lag.py`、`hac.py`、`walk_forward.py`、`bootstrap.py`），修正了 5 处统计口径：OKX 日线是 16:00 UTC **开盘锚定**；因子天然滞后；`BTC→SOL` 控制滞后 `ETH`；Newey–West HAC 用固定滞后（5/12）、不乘小样本自由度因子、双侧正态 p 值；自助法用于成本闸净日收益均值检验，总裁决由 4 条准则共同决定。
+  2. 核对 `myquant` 含 `run_trial.py` 的最早公开提交 `e992b10`（`run_trial.py`、`okx.py`、`panel.py`、`lead_lag.py`、`hac.py`、`walk_forward.py`、`bootstrap.py`），修正了 5 处统计口径：OKX 日线是 16:00 UTC **开盘锚定**；因子天然滞后；`BTC→SOL` 控制滞后 `ETH`；Newey–West HAC 用固定滞后（5/12）、不乘小样本自由度因子、双侧正态 p 值；自助法用于成本闸净日收益均值检验，总裁决由 4 条准则共同决定。
   3. 因 `gate / rules` 用 `main` 的 `research-boundary` 查 PR，必须先合入框架与 `sqp.stats` 纯 Python 统计原语（本次 PR），下一个 PR 再合入 `studies/btc_eth_001.py` 和合成数据彩排。
   4. 堵住现行 `run.py` 的 `console.log` 侧信道：盲复现模式丢弃控制台输出，绝不落盘 `console.log`；`BlindMetrics.quality` 实施严格字段与类型白名单；禁止通过 `params` 放宽门槛（严格守住 `docs/lineage.md` 的 1.0 标准误与 5% 样本差上限）。
   5. 融合现有仓库机制：复用 `approvals.jsonl` 的 `seq`、`Store.put()` 的原子防覆写、`derived/trials/<T>/` 路径，新增单卡绑定 `trial` 字段和存储桶一次性消费标记 `ledger/approvals/<seq>.used.json`（含随机 `nonce`），并在消耗批准前仅靠 `.inputs.json` 检查数据月度分块就绪（不读行情、未就绪不烧批准）。
@@ -22,7 +51,7 @@
   3. 同步推进录制断更与存储桶空间预警，以及决策 0028 的 U2 美股 ETF 规划。
 
 **踩到的坑**
-- `myquant@feb6a07` 前端 TypeScript 的 `leadLag.ts` 和历史提交 `e992b10` 真正跑出 `btc-eth-001` 账本的 Python 统计核口径不同（HAC 带宽、小样本缩放、p 值分布、自助法对象都不同）。复现前代研究时必须追到真正产出账本的那次提交。
+- `myquant@feb6a07` 前端 TypeScript 的 `leadLag.ts` 和历史提交 `e992b10` 的 Python 统计核口径不同（HAC 带宽、小样本缩放、p 值分布、自助法对象都不同）。复现前代研究时必须追到实际产出统计口径的公开 Python 实现。
 - `gate / rules` 永远拿 `main` 上的 `research-boundary` 查 PR，新增共享函数和研究代码不能塞进同一个 PR。
 
 ## 2026-11-26（深夜）· Claude（Opus 5.5）· G2：录制任务遇到 Binance 防火墙（403）

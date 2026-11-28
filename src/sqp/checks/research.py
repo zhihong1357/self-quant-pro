@@ -91,14 +91,15 @@ FORBIDDEN_NAMES = frozenset(
         "locals",
         "open",
         "setattr",
+        "type",
         "vars",
     }
 )
 _DANGEROUS_OBJECTS = tuple(getattr(builtins, n) for n in sorted(FORBIDDEN_NAMES) if n[0] != "_")
 # Names that read files, run text as a query that can itself read files (polars SQL
-# has read_parquet() table functions), evaluate annotation strings as code, or are
-# modules that reach the rest of the process. Refused even where the checker cannot
-# tell what object they belong to.
+# has read_parquet() table functions), evaluate annotation strings as code, reach private
+# attributes via format strings, or are modules that reach the rest of the process.
+# Refused even where the checker cannot tell what object they belong to.
 OTHER_NAMES = frozenset(
     {
         "sql",
@@ -110,6 +111,8 @@ OTHER_NAMES = frozenset(
         "ForwardRef",
         "evaluate_forward_ref",
         "get_type_hints",
+        "format",  # str.format / builtin format can traverse private attributes and stack frames
+        "format_map",
         "builtins",
         "bltns",
         "sys",
@@ -258,6 +261,13 @@ def _scan(path: str, source: str) -> list[Violation]:
                         flag(node, f"{local} 导入了两次：一个名字只能导入一次")
                     elif obj is not _MISSING:
                         bound[local] = obj
+        elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            allowed_init_dunder = path == f"{STUDIES}__init__.py" and node.name in (
+                "__repr__",
+                "__str__",
+            )
+            if node.name.startswith("__") and not allowed_init_dunder:
+                flag(node, f"研究代码不能定义双下划线名字 {node.name}")
         elif isinstance(node, ast.Attribute):
             polars_eval = node.attr == "eval" and _parent_attr(node) in ("list", "arr")
             if not polars_eval and (reason := _bad_name(node.attr)):

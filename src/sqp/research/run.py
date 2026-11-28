@@ -21,6 +21,7 @@ Whatever the study prints is captured into `derived/trials/<T>/console.log`.
 
 from __future__ import annotations
 
+import builtins
 import contextlib
 import copy
 import hashlib
@@ -28,7 +29,9 @@ import importlib
 import io
 import json
 import os
+import sys
 import tomllib
+import urllib.error
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -37,13 +40,16 @@ from pathlib import Path
 from sqp import ledger
 from sqp.data.pit import (
     AccessRefused,
+    IntegrityError,
     PointInTime,
     VaultReceipt,
     _git,
     _on_main,
     _running_main_in_actions,
+    check_vault_approval,
     consume_vault_approval,
     dataset_window_ready,
+    parse_iso_utc,
 )
 from sqp.research import blind, trials
 from sqp.research.studies import SECTIONS, VERDICTS, BlindMetrics
@@ -58,6 +64,39 @@ JSON = "application/json; charset=utf-8"
 
 class TrialRefused(Exception):
     pass
+
+
+class BlindTrialFailed(Exception):
+    """Post-start failure of a blind replication trial; public log prints a fixed line only."""
+
+
+def _is_verified_module_type(kind: type, prefixes: tuple[str, ...]) -> bool:
+    mod_name = getattr(kind, "__module__", "")
+    if not isinstance(mod_name, str) or not mod_name.startswith(prefixes):
+        return False
+    mod = sys.modules.get(mod_name)
+    return mod is not None and getattr(mod, kind.__name__, None) is kind
+
+
+def error_name(exc: BaseException) -> str:
+    """The error's type if it is a built-in or known framework/network error.
+
+    A type made by study code is never named in public logs or `failed.json`:
+    its name could be built from data (`type("S3_14", ...)`).
+    """
+    kind = type(exc)
+    if getattr(builtins, kind.__name__, None) is kind or kind in (
+        AccessRefused,
+        IntegrityError,
+        TrialRefused,
+        BlindTrialFailed,
+        urllib.error.URLError,
+        urllib.error.HTTPError,
+    ):
+        return kind.__name__
+    if _is_verified_module_type(kind, ("google.api_core.", "google.cloud.")):
+        return kind.__name__
+    return "研究代码自己定义的错误类型（名字不打印）"
 
 
 def started_key(tid: str) -> str:
@@ -160,13 +199,17 @@ def _outcome(result: object) -> tuple[dict, dict, str | None]:
     return metrics, sections, verdict
 
 
-def _preflight_readiness(store: Store, params: dict) -> None:
+def _preflight_readiness(store: Store, params: dict, *, required: bool = False) -> None:
     """Verify required dataset months/symbols exist in .inputs.json before consuming approval."""
     dataset = params.get("required_dataset")
     symbols = params.get("required_symbols")
     start_month = params.get("required_start_month")
     end_month = params.get("required_end_month")
     if not any(v is not None for v in (dataset, symbols, start_month, end_month)):
+        if required:
+            raise TrialRefused(
+                "盲复现试验卡缺少必填的 required_dataset / required_symbols / 月份前置检查参数"
+            )
         return
     if not (
         isinstance(dataset, str)
@@ -184,6 +227,49 @@ def _preflight_readiness(store: Store, params: dict) -> None:
         preview = "、".join(missing[:6])
         more = f" 等共 {len(missing)} 项" if len(missing) > 6 else ""
         raise TrialRefused(f"数据还没到齐，本次未开始、未消耗批准：缺少 {preview}{more}")
+
+
+@contextlib.contextmanager
+def _silence_os_fds():
+    """Redirect OS fd 1 & 2 to /dev/null during blind study execution (catches Rust/C output)."""
+    saved: list[tuple[int, int]] = []
+    devnull: int | None = None
+    try:
+        try:
+            devnull = os.open(os.devnull, os.O_WRONLY)
+            for fd in (1, 2):
+                saved.append((fd, os.dup(fd)))
+                os.dup2(devnull, fd)
+        except OSError:
+            pass
+        yield
+    finally:
+        for fd, copy_fd in saved:
+            with contextlib.suppress(OSError):
+                os.dup2(copy_fd, fd)
+            with contextlib.suppress(OSError):
+                os.close(copy_fd)
+        if devnull is not None:
+            with contextlib.suppress(OSError):
+                os.close(devnull)
+
+
+def _invoke_study(
+    package: str,
+    study_name: str,
+    pit: PointInTime | None,
+    params: dict,
+    console: io.StringIO,
+    *,
+    silence_fds: bool,
+) -> object:
+    """Run study code in its own stack frame without reference bytes or receipts in locals."""
+    study = importlib.import_module(f"{package}.{study_name}")
+    with contextlib.redirect_stdout(console), contextlib.redirect_stderr(console):
+        if silence_fds:
+            with _silence_os_fds():
+                return study.run(pit, params)
+        return study.run(pit, params)
 
 
 def run_trial(
@@ -207,6 +293,8 @@ def run_trial(
     universe = card["universe"]
     if trial.repeat_of and not store.exists(completed_key(trial.repeat_of)):
         raise TrialRefused(f"要重跑的 {trial.repeat_of} 还没有跑完，没有可以比对的指纹")
+    if store.exists(started_key(tid)):
+        raise TrialRefused(f"{tid} 已经开始过（每张试验卡只跑一次；要再试，登记一张新卡）")
     commit = (_git(repo_root, "rev-parse", "HEAD") or "").strip()
     stamp = {"trial": tid, "card_hash": trial.record["hash"], "code_commit": commit}
 
@@ -214,16 +302,47 @@ def run_trial(
     ref: blind.InheritedRef | None = None
     ref_bytes: bytes | None = None
     limit_dt: datetime | None = None
-    if is_blind:
-        _preflight_readiness(store, trial.params)
-        inherited = trial.inherited or {}
-        ref = blind.manifest_entry(_read(repo_root), inherited.get("source"), inherited.get("path"))
-        if ref is None:
-            raise TrialRefused("盲复现引用的继承基线不在 main 的 manifest.json 中")
-        ref_bytes = blind.load_reference_bytes(ref, store, fetch=fetch)
-        limit_dt = trials._parse_iso_utc(trial.max_knowable_time)
-        if limit_dt is None:
-            raise TrialRefused("盲复现试验卡缺少合法的 max_knowable_time")
+    # Pre-flight: every check before started.json leaves the card & one-time approval intact.
+    try:
+        if is_blind:
+            limit_dt = parse_iso_utc(trial.max_knowable_time)
+            if limit_dt is None:
+                raise TrialRefused("盲复现试验卡缺少合法的 max_knowable_time")
+            if bad_params := blind.validate_params(
+                trial.study, trial.params, max_knowable_time=limit_dt
+            ):
+                raise TrialRefused("前置检查失败，本次未开始、未消耗批准：" + "；".join(bad_params))
+            _preflight_readiness(store, trial.params, required=True)
+            inherited = trial.inherited or {}
+            ref = blind.manifest_entry(
+                _read(repo_root), inherited.get("source"), inherited.get("path")
+            )
+            if ref is None:
+                raise TrialRefused("盲复现引用的继承基线不在 main 的 manifest.json 中")
+            ref_bytes = blind.load_reference_bytes(ref, store, fetch=fetch)
+            blind.validate_reference_bytes(trial.study, ref_bytes)
+        if trial.segment == "vault":
+            if trial.approval is None:
+                raise TrialRefused("读金库段必须提供 approval（批准记录的 seq）")
+            try:
+                check_vault_approval(
+                    repo_root,
+                    store,
+                    universe=universe,
+                    hypothesis=trial.hypothesis,
+                    trial=tid,
+                    approval=trial.approval,
+                    mode=trial.mode,
+                    study=trial.study,
+                    max_knowable_time=limit_dt,
+                    inherited=trial.inherited,
+                )
+            except AccessRefused as exc:
+                raise TrialRefused(str(exc)) from None
+    except TrialRefused:
+        raise
+    except Exception as exc:
+        raise TrialRefused(f"前置检查失败，本次未开始、未消耗批准：{error_name(exc)}") from None
 
     _put_marker(
         store,
@@ -280,14 +399,20 @@ def run_trial(
         )
     console = io.StringIO()
     try:
-        study = importlib.import_module(f"{package}.{trial.study}")
-        with contextlib.redirect_stdout(console), contextlib.redirect_stderr(console):
-            raw_result = study.run(pit, params)
+        raw_result = _invoke_study(package, trial.study, pit, params, console, silence_fds=is_blind)
         if is_blind:
-            if not isinstance(raw_result, BlindMetrics):
-                raise TypeError("盲复现研究必须返回 BlindMetrics")
-            assert ref is not None and ref_bytes is not None
-            compared = blind.compare(trial.study, raw_result, ref_bytes, ref, trial.params)
+            if type(raw_result) is not BlindMetrics:
+                raise TypeError("盲复现研究必须返回内置 BlindMetrics")
+            if ref is None or ref_bytes is None:
+                raise RuntimeError("盲复现缺少已核对的对照基线")
+            compared = blind.compare(
+                trial.study,
+                raw_result,
+                ref_bytes,
+                ref,
+                trial.params,
+                max_knowable_time=limit_dt,
+            )
             metrics, sections, verdict = _outcome(compared)
             blind.assert_no_forbidden_keys(metrics)
         else:
@@ -308,14 +433,16 @@ def run_trial(
         }
         report = _report(trial, card, sections, facts)
     except Exception as exc:
-        # The exception's message may carry numbers, so only its type is stored and
-        # shown; the run still counts as a trial (decision 0025). Blind replications
-        # discard console output completely so raw numbers never land in the bucket.
-        failed = {**stamp, "at": _now(), "error": type(exc).__name__, **_run_info()}
+        # The exception's message or dynamic type name may carry numbers, so only a
+        # sanitized type name is stored; the run still counts as a trial (decision 0025).
+        # Blind replications discard console output completely and raise BlindTrialFailed
+        # so the public CLI log reveals neither the error class nor any stack frames.
+        failed = {**stamp, "at": _now(), "error": error_name(exc), **_run_info()}
         store.put(f"{LEDGER_PREFIX}{tid}.failed.json", ledger.canonical(failed), content_type=JSON)
         if not is_blind:
             _keep_console(store, tid, console)
-        raise
+            raise
+        raise BlindTrialFailed("盲复现运行失败") from exc
     if not is_blind:
         _keep_console(store, tid, console)
     store.put(f"{DERIVED_PREFIX}{tid}/result.json", result, content_type=JSON)

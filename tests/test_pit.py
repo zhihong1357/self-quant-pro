@@ -298,15 +298,18 @@ def test_vault_needs_a_merged_one_time_owner_approval(
     )
     assert store.exists(approval_used_key(seq))
     authed = PointInTime(repo, store, purpose="H-0001", vault_receipt=receipt)
-    rows = authed.table(DATASET, end=utc(2025, 11, 1, 2), start=utc(2025, 10, 31, 23))
-    assert rows.height == 4
+    rows = authed.table(DATASET, end=utc(2025, 11, 1, 2), start=utc(2025, 11, 1, 0))
+    assert rows.height == 3  # 00:00, 01:00 and 02:00: all inside vault
+    # Crossing confirmation + vault on a standard vault receipt is refused (F8).
+    with pytest.raises(AccessRefused, match="跨多个受保护段"):
+        authed.table(DATASET, end=utc(2025, 11, 1, 2), start=utc(2025, 10, 31, 23))
     # Second read within the same authorized run succeeds; consuming the approval again fails.
     assert authed.table(DATASET, end=utc(2025, 11, 1, 2), start=utc(2025, 11, 1, 1)).height == 2
     with pytest.raises(AccessRefused, match="已经使用过"):
         consume_vault_approval(
             repo, store, universe="U1", hypothesis="H-0001", trial="T-0001", approval=seq
         )
-    assert len(refusals(repo)) == 2
+    assert len(refusals(repo)) == 3
 
 
 @pytest.mark.parametrize(

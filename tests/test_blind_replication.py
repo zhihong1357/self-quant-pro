@@ -21,7 +21,6 @@ from sqp.data import build, vision
 from sqp.data.pit import (
     APPROVALS,
     AccessRefused,
-    IntegrityError,
     PointInTime,
     approval_used_key,
     dataset_window_ready,
@@ -44,6 +43,13 @@ UM = "data/futures/um/monthly/klines/"
 DATASET = "um-klines-1h"
 INHERITED_SPEC = {"source": "myquant", "path": "research/btc-eth-001/trials.jsonl"}
 MAX_KT = "2026-11-18T00:00:00Z"
+DECISION_0031 = "docs/decisions/0031-one-time-vault-approval-and-blind-replication.md"
+VALID_BLIND_PARAMS: dict[str, object] = {
+    "required_dataset": DATASET,
+    "required_symbols": ["BTCUSDT", "ETHUSDT", "SOLUSDT"],
+    "required_start_month": "2023-01",
+    "required_end_month": "2026-11",
+}
 
 HYPOTHESIS_TEMPLATE = """id = "{hid}"
 title = "盲复现测试"
@@ -243,14 +249,13 @@ def _make_manifest(ref_bytes: bytes) -> str:
     return json.dumps(doc, sort_keys=True)
 
 
-def _zipped_bars(symbol: str, start: datetime, n: int) -> bytes:
-    start_ms = int(start.timestamp() * 1000)
+def _zipped_bars(
+    symbol: str, start: datetime, n: int, extra_starts: tuple[datetime, ...] = ()
+) -> bytes:
     hour = 3_600_000
-    rows = "".join(
-        f"{start_ms + i * hour},100,101,99,100.5,10,"
-        f"{start_ms + (i + 1) * hour - 1},1000,5,5,500,0\n"
-        for i in range(n)
-    )
+    starts_ms = [int(start.timestamp() * 1000) + i * hour for i in range(n)]
+    starts_ms.extend(int(t.timestamp() * 1000) for t in extra_starts)
+    rows = "".join(f"{ms},100,101,99,100.5,10,{ms + hour - 1},1000,5,5,500,0\n" for ms in starts_ms)
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as z:
         z.writestr(f"{symbol}.csv", rows)
@@ -258,7 +263,10 @@ def _zipped_bars(symbol: str, start: datetime, n: int) -> bytes:
 
 
 def _build_lake(
-    tmp_path: Path, months: dict[str, datetime], symbols: tuple[str, ...]
+    tmp_path: Path,
+    months: dict[str, datetime],
+    symbols: tuple[str, ...],
+    extra_bars: dict[str, tuple[datetime, ...]] | None = None,
 ) -> LocalStore:
     store = LocalStore(tmp_path / "lake")
     source = vision.Source(
@@ -268,28 +276,61 @@ def _build_lake(
         datasets=[{"id": DATASET, "kind": "klines", "prefix": UM + "{symbol}/1h/"}],
     )
     for month, start in months.items():
+        extras = (extra_bars or {}).get(month, ())
         for sym in symbols:
             key = f"{vision.RAW_PREFIX}{UM}{sym}/1h/{sym}-1h-{month}.zip"
-            store.put(key, _zipped_bars(sym, start, 2))
+            store.put(key, _zipped_bars(sym, start, 2, extra_starts=extras))
     build.build(source, lambda: store, room=10**9)
     return store
 
 
+def _full_window_months() -> dict[str, datetime]:
+    months: dict[str, datetime] = {}
+    y, m = 2023, 1
+    while (y, m) <= (2026, 11):
+        label = f"{y:04d}-{m:02d}"
+        months[label] = datetime(y, m, 1, 0, tzinfo=UTC)
+        m += 1
+        if m == 13:
+            y, m = y + 1, 1
+    months["2024-01"] = datetime(2024, 1, 31, 22, tzinfo=UTC)
+    months["2024-02"] = datetime(2024, 2, 1, 0, tzinfo=UTC)
+    months["2025-11"] = datetime(2025, 11, 1, 0, tzinfo=UTC)
+    months["2026-11"] = datetime(2026, 11, 17, 22, tzinfo=UTC)
+    return months
+
+
+@pytest.fixture(scope="session")
+def _blind_lake_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    base = tmp_path_factory.mktemp("blind_lake_tpl")
+    store = _build_lake(
+        base,
+        months=_full_window_months(),
+        symbols=("BTCUSDT", "ETHUSDT", "SOLUSDT"),
+        extra_bars={"2026-11": (datetime(2026, 11, 20, 0, tzinfo=UTC),)},
+    )
+    return store.root
+
+
 BLIND_STUDY_CODE = """
+import os
 import sys
 from datetime import UTC, datetime
 
 from sqp.research.studies import SECTIONS, BlindMetrics, Outcome
 
 CALLS = []
+BEHAVIOR = "ok"
+BETA_ETH = 0.014
 
 
 def run(pit, params):
     CALLS.append(1)
-    behavior = params.get("behavior", "ok")
+    behavior = BEHAVIOR
     if behavior == "print_and_ok":
         print("LEAK_BETA=0.98765")
         sys.stderr.write("LEAK_SE=0.01234\\n")
+        os.write(1, b"LEAK_FD1=0.55555\\n")
     if behavior == "crash":
         print("LEAK_BEFORE_CRASH=3.14159")
         raise ValueError("LEAK_BETA=9.99")
@@ -338,10 +379,7 @@ def run(pit, params):
                 "hourly_btc_eth": False,
             },
             "tests": {
-                "daily_btc_eth": {
-                    "coefficient": params.get("beta_eth", 0.014),
-                    "observations": 1000,
-                },
+                "daily_btc_eth": {"coefficient": BETA_ETH, "observations": 1000},
                 "daily_btc_sol": {"coefficient": -0.005, "observations": 1000},
                 "hourly_btc_eth": {"coefficient": 0.002, "observations": 2000},
             },
@@ -349,6 +387,15 @@ def run(pit, params):
         quality=quality,
     )
 """
+
+
+def _configure_study(pkg: str, *, behavior: str = "ok", beta_eth: float = 0.014) -> object:
+    import importlib
+
+    mod = importlib.import_module(f"{pkg}.btc_eth_001")
+    mod.BEHAVIOR = behavior
+    mod.BETA_ETH = beta_eth
+    return mod
 
 
 @pytest.fixture
@@ -364,12 +411,13 @@ def blind_studies(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
 
 
 @pytest.fixture
-def blind_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def blind_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _blind_lake_template: Path):
     """A git repo + local store set up for end-to-end blind replication tests."""
     ref_bytes = _synthetic_ref_bytes()
     root = tmp_path / "repo"
     for sub in (
         "config",
+        "docs/decisions",
         "registry/universes",
         "registry/ledger",
         "registry/hypotheses",
@@ -380,19 +428,20 @@ def blind_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     shutil.copy(ROOT / "registry/universes/U1.toml", root / "registry/universes/U1.toml")
     shutil.copy(ROOT / "config/inheritance.toml", root / "config/inheritance.toml")
     shutil.copy(ROOT / trials.INHERITED, root / trials.INHERITED)
+    shutil.copy(ROOT / DECISION_0031, root / DECISION_0031)
     (root / blind.MANIFEST_PATH).write_text(_make_manifest(ref_bytes))
     (root / "registry/hypotheses/H-0010.toml").write_text(
         HYPOTHESIS_TEMPLATE.format(
             hid="H-0010",
             family="crypto.cross-asset-transmission",
-            segments='["vault"]',
+            segments='["confirmation", "vault", "forward"]',
         )
     )
     (root / "registry/hypotheses/H-0011.toml").write_text(
         HYPOTHESIS_TEMPLATE.format(
             hid="H-0011",
             family="crypto.fresh-family",
-            segments='["vault"]',
+            segments='["confirmation", "vault", "forward"]',
         )
     )
     (root / "src/sqp/research/studies/btc_eth_001.py").write_text("x = 1\n")
@@ -406,16 +455,9 @@ def blind_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("GITHUB_REF", "refs/heads/main")
     monkeypatch.setenv("GITHUB_EVENT_NAME", "workflow_dispatch")
 
-    store = _build_lake(
-        tmp_path,
-        months={
-            "2024-01": datetime(2024, 1, 31, 22, tzinfo=UTC),
-            "2024-02": datetime(2024, 2, 1, 0, tzinfo=UTC),
-            "2025-11": datetime(2025, 11, 1, 0, tzinfo=UTC),
-            "2026-11": datetime(2026, 11, 17, 22, tzinfo=UTC),
-        },
-        symbols=("BTCUSDT", "ETHUSDT", "SOLUSDT"),
-    )
+    lake_dir = tmp_path / "lake"
+    shutil.copytree(_blind_lake_template, lake_dir)
+    store = LocalStore(lake_dir)
     ref = blind.manifest_entry(lambda p: (root / p).read_text(), "myquant", INHERITED_SPEC["path"])
     assert ref is not None
     store.put(blind.raw_cache_key(ref), ref_bytes)
@@ -429,6 +471,8 @@ def _append_blind_pair(
     hypothesis: str = "H-0010",
     max_kt: str = MAX_KT,
     params: dict | None = None,
+    tests: int = 3,
+    redo_decision: str | None = None,
 ) -> int:
     ap = ledger.append(
         root / APPROVALS,
@@ -443,22 +487,22 @@ def _append_blind_pair(
             "inherited": INHERITED_SPEC,
         },
     )
-    ledger.append(
-        root / trials.TRIALS,
-        {
-            "type": "trial",
-            "hypothesis": hypothesis,
-            "study": "btc_eth_001",
-            "segment": "vault",
-            "mode": "blind_replication",
-            "approval": ap["seq"],
-            "max_knowable_time": max_kt,
-            "inherited": INHERITED_SPEC,
-            "tests": 3,
-            "params": params or {},
-            "note": "盲复现测试",
-        },
-    )
+    card: dict[str, object] = {
+        "type": "trial",
+        "hypothesis": hypothesis,
+        "study": "btc_eth_001",
+        "segment": "vault",
+        "mode": "blind_replication",
+        "approval": ap["seq"],
+        "max_knowable_time": max_kt,
+        "inherited": INHERITED_SPEC,
+        "tests": tests,
+        "params": dict(VALID_BLIND_PARAMS) if params is None else params,
+        "note": "盲复现测试",
+    }
+    if redo_decision is not None:
+        card["redo_decision"] = redo_decision
+    ledger.append(root / trials.TRIALS, card)
     _merge(root)
     return int(ap["seq"])
 
@@ -519,17 +563,22 @@ def test_static_burned_family_guards_and_four_locks(sandbox):
     sandbox.write("registry/universes/U1.toml", (ROOT / "registry/universes/U1.toml").read_text())
     sandbox.write("config/inheritance.toml", (ROOT / "config/inheritance.toml").read_text())
     sandbox.write(blind.MANIFEST_PATH, _make_manifest(_synthetic_ref_bytes()))
+    sandbox.write(DECISION_0031, (ROOT / DECISION_0031).read_text())
     sandbox.write(
         "registry/hypotheses/H-0010.toml",
         HYPOTHESIS_TEMPLATE.format(
             hid="H-0010",
             family="crypto.cross-asset-transmission",
-            segments='["confirmation", "vault"]',
+            segments='["confirmation", "vault", "forward"]',
         ),
     )
     sandbox.write(
         "registry/hypotheses/H-0011.toml",
-        HYPOTHESIS_TEMPLATE.format(hid="H-0011", family="crypto.fresh", segments='["vault"]'),
+        HYPOTHESIS_TEMPLATE.format(
+            hid="H-0011",
+            family="crypto.fresh",
+            segments='["confirmation", "vault", "forward"]',
+        ),
     )
     sandbox.write(
         "registry/hypotheses/H-0012.toml",
@@ -620,7 +669,8 @@ def test_static_burned_family_guards_and_four_locks(sandbox):
                 "approval": 1,
                 "max_knowable_time": MAX_KT,
                 "inherited": INHERITED_SPEC,
-                "params": {},
+                "tests": 3,
+                "params": dict(VALID_BLIND_PARAMS),
                 "note": "未烧毁族越权",
             }
         ),
@@ -656,7 +706,8 @@ def test_static_burned_family_guards_and_four_locks(sandbox):
                 "approval": 1,
                 "max_knowable_time": past,
                 "inherited": INHERITED_SPEC,
-                "params": {},
+                "tests": 3,
+                "params": dict(VALID_BLIND_PARAMS),
                 "note": "超截止日",
             }
         ),
@@ -664,21 +715,93 @@ def test_static_burned_family_guards_and_four_locks(sandbox):
     assert any("超过了 burned_through" in v.message for v in sandbox.check(base))
 
 
-# --- 2. Runtime: readiness, consumption, PIT clamp, zero-leakage, re-run block ---
+def test_static_blind_min_tests_three_segments_and_redo_decision(sandbox):
+    sandbox.write("registry/universes/U1.toml", (ROOT / "registry/universes/U1.toml").read_text())
+    sandbox.write("config/inheritance.toml", (ROOT / "config/inheritance.toml").read_text())
+    sandbox.write(blind.MANIFEST_PATH, _make_manifest(_synthetic_ref_bytes()))
+    sandbox.write(DECISION_0031, (ROOT / DECISION_0031).read_text())
+    sandbox.write(
+        "registry/hypotheses/H-0010.toml",
+        HYPOTHESIS_TEMPLATE.format(
+            hid="H-0010",
+            family="crypto.cross-asset-transmission",
+            segments='["vault"]',  # missing confirmation & forward!
+        ),
+    )
+    sandbox.write("src/sqp/research/studies/btc_eth_001.py", "x = 1\n")
+    sandbox.write(APPROVALS, "")
+    sandbox.write(trials.TRIALS, "")
+    base = sandbox.commit("base")
+
+    ap1 = {
+        "type": "vault",
+        "universe": "U1",
+        "hypothesis": "H-0010",
+        "trial": "T-0001",
+        "mode": "blind_replication",
+        "study": "btc_eth_001",
+        "max_knowable_time": MAX_KT,
+        "inherited": INHERITED_SPEC,
+    }
+    t1 = {
+        "type": "trial",
+        "hypothesis": "H-0010",
+        "study": "btc_eth_001",
+        "segment": "vault",
+        "mode": "blind_replication",
+        "approval": 1,
+        "max_knowable_time": MAX_KT,
+        "inherited": INHERITED_SPEC,
+        "tests": 1,  # L6: below min_tests = 3
+        "params": dict(VALID_BLIND_PARAMS),
+        "note": "缺段且少计次数",
+    }
+    sandbox.write(APPROVALS, _ledger_text(ap1))
+    sandbox.write(trials.TRIALS, _ledger_text(t1))
+    msgs = [v.message for v in sandbox.check(base) if v.rule == "trial-card"]
+    assert any("计划全部受保护段" in m for m in msgs)
+    assert any("tests 至少为 3" in m for m in msgs)
+
+    # Fix segments & tests, then submit a second blind card on the same baseline
+    # without redo_decision (L5).
+    sandbox.write(
+        "registry/hypotheses/H-0010.toml",
+        HYPOTHESIS_TEMPLATE.format(
+            hid="H-0010",
+            family="crypto.cross-asset-transmission",
+            segments='["confirmation", "vault", "forward"]',
+        ),
+    )
+    ap2 = {**ap1, "trial": "T-0002"}
+    t1_ok = {**t1, "tests": 3}
+    t2_no_dec = {**t1_ok, "approval": 2, "note": "无决策直接重跑"}
+    sandbox.write(APPROVALS, _ledger_text(ap1, ap2))
+    sandbox.write(trials.TRIALS, _ledger_text(t1_ok, t2_no_dec))
+    assert any("redo_decision" in v.message for v in sandbox.check(base) if v.rule == "trial-card")
+    # With an existing decision path, it passes.
+    t2_ok = {**t2_no_dec, "redo_decision": DECISION_0031}
+    sandbox.write(trials.TRIALS, _ledger_text(t1_ok, t2_ok))
+    assert not any(v.rule == "trial-card" for v in sandbox.check(base))
+
+
+# --- 2. Runtime: readiness, consumption, PIT clamp, blind output, re-run block ---
 
 
 def test_blind_replication_end_to_end_zero_leakage_and_rerun_blocked(
     blind_env, blind_studies, capsys
 ):
     root, store, ref, _ = blind_env
-    seq = _append_blind_pair(root, params={"behavior": "print_and_ok", "beta_eth": 0.014})
+    mod = _configure_study(blind_studies, behavior="print_and_ok", beta_eth=0.014)
+    seq = _append_blind_pair(root)
 
     done = run.run_trial(root, store, "T-0001", package=blind_studies)
     out = capsys.readouterr()
     assert done.alarms == []
     assert "判定：一致" in done.lines
-    assert "0.98765" not in out.out + out.err + "\n".join(done.lines)
-    assert "0.01234" not in out.out + out.err + "\n".join(done.lines)
+    combined_out = out.out + out.err + "\n".join(done.lines)
+    assert "0.98765" not in combined_out
+    assert "0.01234" not in combined_out
+    assert "0.55555" not in combined_out
     assert store.exists(approval_used_key(seq))
     assert not store.exists("derived/trials/T-0001/console.log")  # console discarded!
 
@@ -688,12 +811,12 @@ def test_blind_replication_end_to_end_zero_leakage_and_rerun_blocked(
     blind.assert_no_forbidden_keys(res)
     assert res["metrics"]["overall_verdict"] == "一致"
     assert res["metrics"]["tests"]["daily_btc_eth"]["delta_se"] == 0.2
+    assert "observations_binance" not in res["metrics"]["tests"]["daily_btc_eth"]
     assert res["metrics"]["reference"]["sha256"] == ref.sha256
     assert "0.98765" not in rep_bytes.decode() and "0.01234" not in rep_bytes.decode()
     assert "0.014" not in res_bytes.decode() and "0.014" not in rep_bytes.decode()
 
     # Re-running the same trial card is immediately blocked without invoking the study.
-    mod = sys.modules[f"{blind_studies}.btc_eth_001"]
     calls_before = len(mod.CALLS)
     with pytest.raises(run.TrialRefused, match="已经开始过"):
         run.run_trial(root, store, "T-0001", package=blind_studies)
@@ -702,15 +825,11 @@ def test_blind_replication_end_to_end_zero_leakage_and_rerun_blocked(
 
 def test_data_not_ready_refuses_without_consuming_approval(blind_env, blind_studies):
     root, store, _, _ = blind_env
-    seq = _append_blind_pair(
-        root,
-        params={
-            "required_dataset": DATASET,
-            "required_symbols": ["BTCUSDT", "ETHUSDT", "SOLUSDT"],
-            "required_start_month": "2026-10",  # 2026-10 is absent in blind_env lake
-            "required_end_month": "2026-11",
-        },
-    )
+    # Remove 2026-11 committed metadata from the lake to simulate month not yet arrived.
+    for key in list(store.keys(build.DATASET_PREFIX)):
+        if "2026-11" in key and key.endswith(".inputs.json"):
+            (store.root / key).unlink()
+    seq = _append_blind_pair(root)
     with pytest.raises(run.TrialRefused, match="未消耗批准"):
         run.run_trial(root, store, "T-0001", package=blind_studies)
     assert not store.exists(run.started_key("T-0001"))
@@ -719,9 +838,11 @@ def test_data_not_ready_refuses_without_consuming_approval(blind_env, blind_stud
 
 def test_blind_crash_redacts_error_discards_console_and_burns_approval(blind_env, blind_studies):
     root, store, _, _ = blind_env
-    seq = _append_blind_pair(root, params={"behavior": "crash"})
-    with pytest.raises(ValueError):
+    _configure_study(blind_studies, behavior="crash")
+    seq = _append_blind_pair(root)
+    with pytest.raises(run.BlindTrialFailed) as exc_info:
         run.run_trial(root, store, "T-0001", package=blind_studies)
+    assert isinstance(exc_info.value.__cause__, ValueError)
     failed = store.get("ledger/trials/T-0001.failed.json").decode()
     assert "ValueError" in failed and "9.99" not in failed
     assert not store.exists("derived/trials/T-0001/console.log")
@@ -742,48 +863,121 @@ def test_blind_pit_enforces_max_knowable_time_and_blocks_direct_multi_segment(
             allowed=frozenset({"confirmation", "vault", "forward"}),
         )
     # Study querying past max_knowable_time is refused by PointInTime._authorize().
-    _append_blind_pair(root, params={"behavior": "past_limit"})
-    with pytest.raises(AccessRefused, match="超过允许的上限"):
+    _configure_study(blind_studies, behavior="past_limit")
+    _append_blind_pair(root)
+    with pytest.raises(run.BlindTrialFailed) as exc_info:
         run.run_trial(root, store, "T-0001", package=blind_studies)
+    assert isinstance(exc_info.value.__cause__, AccessRefused)
+    assert "超过允许的上限" in str(exc_info.value.__cause__)
 
 
 def test_blind_study_cannot_return_outcome_sneak_quality_or_loosen_bar(blind_env, blind_studies):
     root, store, _, _ = blind_env
-    _append_blind_pair(root, params={"behavior": "return_outcome"})
-    with pytest.raises(TypeError, match="BlindMetrics"):
+    _configure_study(blind_studies, behavior="return_outcome")
+    _append_blind_pair(root)
+    with pytest.raises(run.BlindTrialFailed) as exc_info:
         run.run_trial(root, store, "T-0001", package=blind_studies)
+    assert isinstance(exc_info.value.__cause__, TypeError)
+    assert "BlindMetrics" in str(exc_info.value.__cause__)
 
     # Sneaking an un-allowlisted key into BlindMetrics.quality fails.
-    _append_blind_pair(root, trial_tid="T-0002", params={"behavior": "bad_quality"})
-    with pytest.raises(ValueError, match="白名单"):
+    _configure_study(blind_studies, behavior="bad_quality")
+    _append_blind_pair(root, trial_tid="T-0002", redo_decision=DECISION_0031)
+    with pytest.raises(run.BlindTrialFailed) as exc_info2:
         run.run_trial(root, store, "T-0002", package=blind_studies)
+    assert isinstance(exc_info2.value.__cause__, ValueError)
+    assert "白名单" in str(exc_info2.value.__cause__)
 
-    # Trying to loosen max_delta_se > 1.0 via params fails.
-    _append_blind_pair(root, trial_tid="T-0003", params={"max_delta_se": 1.5})
-    with pytest.raises(ValueError, match="更严"):
+    # Trying to loosen max_delta_se > 1.0 via params fails BEFORE burning approval!
+    _configure_study(blind_studies, behavior="ok")
+    seq3 = _append_blind_pair(
+        root,
+        trial_tid="T-0003",
+        params={**VALID_BLIND_PARAMS, "max_delta_se": 1.5},
+        redo_decision=DECISION_0031,
+    )
+    with pytest.raises(run.TrialRefused, match="更严"):
         run.run_trial(root, store, "T-0003", package=blind_studies)
+    assert not store.exists(run.started_key("T-0003"))
+    assert not store.exists(approval_used_key(seq3))
 
 
-def test_tampered_reference_fails_before_burning_approval(blind_env, blind_studies):
+def test_tampered_reference_heals_from_upstream_or_fails_before_burning_approval(
+    blind_env, blind_studies
+):
     root, store, ref, ref_bytes = blind_env
-    # Overwrite cache with tampered bytes in LocalStore.
+    tampered = ref_bytes.replace(b"0.01", b"0.99", 1)
     tampered_path = store.root / blind.raw_cache_key(ref)
-    tampered_path.write_bytes(ref_bytes.replace(b"0.01", b"0.99", 1))
+    tampered_path.write_bytes(tampered)
+
+    # L2: If upstream also returns tampered bytes, preflight fails cleanly before burning approval.
     seq = _append_blind_pair(root)
-    with pytest.raises(IntegrityError, match="SHA-256"):
-        run.run_trial(root, store, "T-0001", package=blind_studies)
+    with pytest.raises(run.TrialRefused, match="未开始、未消耗批准"):
+        run.run_trial(root, store, "T-0001", package=blind_studies, fetch=lambda _url: tampered)
     assert not store.exists(run.started_key("T-0001"))
     assert not store.exists(approval_used_key(seq))
 
+    # L2: If upstream returns verified bytes, load_reference_bytes self-heals despite bad cache!
+    _configure_study(blind_studies, behavior="ok", beta_eth=0.014)
+    done = run.run_trial(root, store, "T-0001", package=blind_studies, fetch=lambda _url: ref_bytes)
+    assert "判定：一致" in done.lines
 
-def test_research_boundary_blocks_blind_module_and_allows_blind_metrics(sandbox):
-    def viols(src: str) -> list[str]:
-        sandbox.write("src/sqp/research/studies/s.py", src)
-        return [v.message for v in sandbox.check() if v.rule == "research-boundary"]
+
+def test_l1_consume_vault_approval_storage_error_warns_to_check_marker(blind_env, monkeypatch):
+    from sqp.data.pit import consume_vault_approval
+
+    root, store, _, _ = blind_env
+    seq = _append_blind_pair(root)
+
+    def flaky_put(*_a, **_k):
+        raise RuntimeError("ServiceUnavailable")
+
+    monkeypatch.setattr(store, "put", flaky_put)
+    with pytest.raises(AccessRefused, match=rf"批准可能已消耗.*{approval_used_key(seq)}"):
+        consume_vault_approval(
+            root,
+            store,
+            universe="U1",
+            hypothesis="H-0010",
+            trial="T-0001",
+            approval=seq,
+            mode="blind_replication",
+            study="btc_eth_001",
+            max_knowable_time=datetime(2026, 11, 18, 0, tzinfo=UTC),
+            inherited=INHERITED_SPEC,
+        )
+
+
+def test_l3_raw_github_url_percent_encodes_special_characters():
+    ref = blind.InheritedRef(
+        source="myquant",
+        url="https://github.com/zhihong1357/myquant",
+        commit="feb6a07b7a03bbfe7a6c2fccf2b28c1c97b537a7",
+        path="research/crypto%3Abtc-usdt-perp/file#1?v=2.json",
+        bytes=10,
+        sha256="0" * 64,
+    )
+    url = blind.raw_github_url(ref)
+    assert "%253A" in url and "%231%3Fv%3D2" in url
+
+
+def test_research_boundary_blocks_blind_module_format_type_dunder_and_allows_init(sandbox):
+    def viols(src: str, path: str = "src/sqp/research/studies/s.py") -> list[str]:
+        sandbox.write(path, src)
+        return [
+            v.message for v in sandbox.check() if v.rule == "research-boundary" and v.path == path
+        ]
 
     assert viols("from sqp.research import blind\n")
     assert viols("from sqp.research.blind import compare\n")
     assert viols("from sqp.data.pit import VaultReceipt, consume_vault_approval\n")
+    assert viols('def run(pit, params):\n    return "{0._store}".format(pit)\n')
+    assert viols('def run(pit, params):\n    return "{x}".format_map({"x": 1})\n')
+    assert viols('def run(pit, params):\n    return type("L", (Exception,), {})\n')
+    assert viols("class M:\n    def __gt__(self, o):\n        return False\n")
+    # Real studies/__init__.py (with BlindMetrics.__repr__/__str__) passes cleanly.
+    init_src = (ROOT / "src/sqp/research/studies/__init__.py").read_text("utf-8")
+    assert viols(init_src, path="src/sqp/research/studies/__init__.py") == []
     good = (
         "from sqp.research.studies import BlindMetrics\n"
         "from sqp.stats import (\n"
@@ -830,9 +1024,23 @@ def test_pure_python_ols_hac_and_partial_lead_lag_accuracy():
     assert c1.t_statistic is not None and c1.p_value is not None
     assert c1.p_value == pytest.approx(math.erfc(abs(c1.t_statistic) / math.sqrt(2.0)), rel=1e-12)
 
-    # Collinear design matrix rejected.
+    # T2: Generator predictors work in newey_west_hac without being consumed twice.
+    hac_gen = newey_west_hac(
+        (v for v in y), {"x1": (v for v in x1), "x2": (v for v in x2)}, max_lag=2
+    )
+    hac_list = newey_west_hac(y, {"x1": x1, "x2": x2}, max_lag=2)
+    assert hac_gen == hac_list
+
+    # Collinear & ill-conditioned design matrices rejected (T1).
     with pytest.raises(ValueError):
         ols_fit(y, {"x1": x1, "dup": x1})
+    with pytest.raises(ValueError):
+        ols_fit(y, {"tiny_collinear": [1.0 + 1e-15 * i for i in range(n)]})
+    # T1: Full-rank design scaled to 1e-14 without intercept is solved accurately.
+    tiny_x = [1e-14 * v for v in x1]
+    tiny_y = [2.5 * v for v in tiny_x]
+    tiny_fit = ols_fit(tiny_y, {"x": tiny_x}, include_intercept=False)
+    assert tiny_fit.coefficients[0] == pytest.approx(2.5, rel=1e-10)
 
     # Partial lead-lag: strong planted lag-1 effect recovered cleanly.
     src = [rng.gauss(0, 1) for _ in range(n)]
@@ -875,6 +1083,11 @@ def test_holm_purged_walk_forward_and_bootstrap_determinism():
     b2 = circular_block_bootstrap_mean_test(shifted, block_length=5, resamples=500, seed=42)
     assert b1 == b2
     assert b1.p_value < 0.01
+    # T2: non-int seed rejected.
+    with pytest.raises(ValueError, match="seed"):
+        circular_block_bootstrap_mean_test(shifted, block_length=5, resamples=500, seed=1.5)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="seed"):
+        circular_block_bootstrap_mean_test(shifted, block_length=5, resamples=500, seed=True)
 
 
 def test_blind_compare_thresholds_and_byte_determinism():
@@ -899,10 +1112,17 @@ def test_blind_compare_thresholds_and_byte_determinism():
     assert o_se.verdict == "不一致"
     assert "daily_btc_eth:FAIL_DELTA_SE_THRESHOLD" in o_se.metrics["failure_reasons"]
 
-    # Coverage diff > 5% -> 不一致.
+    # Huge beta -> delta_se capped at 9.99 and flagged as capped (F1).
+    o_huge = blind.compare_btc_eth_001(_sample_raw_metrics(beta_eth=1000.0), ref_bytes, ref)
+    assert o_huge.metrics["tests"]["daily_btc_eth"]["delta_se"] == blind.MAX_REPORTED_DELTA_SE
+    assert o_huge.metrics["tests"]["daily_btc_eth"]["delta_se_capped"] is True
+
+    # Coverage diff > 5% -> 不一致, and observations_diff clamped to [-50, +50] (F1).
     o_cov = blind.compare_btc_eth_001(_sample_raw_metrics(obs_eth=940), ref_bytes, ref)
     assert o_cov.verdict == "不一致"
     assert "daily_btc_eth:FAIL_SAMPLE_COVERAGE" in o_cov.metrics["failure_reasons"]
+    assert o_cov.metrics["tests"]["daily_btc_eth"]["observations_diff"] == -50
+    assert o_cov.metrics["tests"]["daily_btc_eth"]["observations_diff_capped"] is True
 
     # Verdict / Holm / bootstrap flip -> 不一致.
     o_flip = blind.compare_btc_eth_001(
@@ -914,7 +1134,7 @@ def test_blind_compare_thresholds_and_byte_determinism():
     assert "cost_gate:FAIL_BOOTSTRAP_MISMATCH" in o_flip.metrics["failure_reasons"]
 
 
-def test_dataset_window_ready_checks_metadata_only(tmp_path):
+def test_dataset_window_ready_checks_metadata_only_and_handles_malformed_json(tmp_path):
     store = _build_lake(
         tmp_path,
         months={"2026-10": datetime(2026, 10, 1, tzinfo=UTC)},
@@ -925,3 +1145,10 @@ def test_dataset_window_ready_checks_metadata_only(tmp_path):
         store, DATASET, ("BTCUSDT", "ETHUSDT", "SOLUSDT"), "2026-10", "2026-11"
     )
     assert missing == ["2026-10:SOLUSDT", "2026-11:BTCUSDT", "2026-11:ETHUSDT", "2026-11:SOLUSDT"]
+    # Malformed non-dict JSON in .inputs.json (e.g. `[]`) must not crash with AttributeError.
+    for key in store.keys(build.DATASET_PREFIX):
+        if key.endswith(".inputs.json"):
+            (store.root / key).write_text("[]")
+    assert dataset_window_ready(store, DATASET, ("BTCUSDT",), "2026-10", "2026-10") == [
+        "2026-10:BTCUSDT"
+    ]
