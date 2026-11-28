@@ -14,17 +14,15 @@ from datetime import UTC, datetime
 
 import polars as pl
 import polars.selectors as cs
-from typing import Any, cast
 
 from sqp.data.pit import AccessRefused, PointInTime
 from sqp.stats import expected_max_sharpe
 
 
-
 def run(pit: PointInTime) -> dict:
     df = pit.table("um-klines-1h", end=datetime(2024, 1, 1, tzinfo=UTC))
     picked = df.select(cs.numeric()).with_columns(pl.col("close").rolling_mean(3))
-    return cast(Any, {"n": picked.height, "x": math.sqrt(2), "e": expected_max_sharpe(9, 1.75)})
+    return {"n": picked.height, "x": math.sqrt(2), "e": expected_max_sharpe(9, 1.75)}
 """
 
 
@@ -220,3 +218,82 @@ def test_studies_may_use_the_engine_but_only_its_own_functions(sandbox):
     assert violations(sandbox, "from sqp.research.engine import pl\n")  # a re-export
     assert violations(sandbox, "from sqp.research.engine import sharpe_standard_error\n")
     assert violations(sandbox, "from sqp.research import engine\n")
+
+
+# --- known static-boundary escape corpus (PR #29 red-team rounds 1 & 2) ------
+
+KNOWN_ESCAPE_CORPUS = [
+    ("str_format_attr", 'def run(pit, p):\n    return "{0._store}".format(pit)\n'),
+    ("str_format_map", 'def run(pit, p):\n    return "{x}".format_map({"x": 1})\n'),
+    (
+        "match_class_pattern",
+        "def run(pit, p):\n    match pit:\n        case object(_store=s):\n            return s\n",
+    ),
+    (
+        "make_dataclass_namespace",
+        "import dataclasses\n"
+        'M = dataclasses.make_dataclass("M", [], namespace={"__gt__": lambda s, o: False})\n',
+    ),
+    ("type_dynamic_class", 'def run(pit, p):\n    return type("M", (Exception,), {})\n'),
+    ("dunder_method_def", "class M:\n    def __gt__(self, other):\n        return False\n"),
+    ("metaclass_abcmeta", 'from typing import ABCMeta\nM = ABCMeta("M", (Exception,), {})\n'),
+    ("internal_function_type", "from dataclasses import FunctionType\n"),
+    (
+        "enum_pickle_by_enum_name",
+        "import enum\ndef run(pit, p):\n    g, _ = enum.pickle_by_enum_name(p, 0)\n    return g\n",
+    ),
+    (
+        "functools_update_wrapper",
+        "import functools\n"
+        'def run(pit, p):\n    functools.update_wrapper(p, pit, assigned=("_store",))\n',
+    ),
+    (
+        "functools_wraps",
+        "import functools\n"
+        'def run(pit, p):\n    return functools.wraps(pit, assigned=("_store",))(p)\n',
+    ),
+    (
+        "enum_global_enum",
+        "import enum\n"
+        'def run(pit, p):\n    e = enum.Enum("K", [("X", 1)], module="builtins")\n'
+        "    enum.global_enum(e)\n",
+    ),
+    (
+        "monkeypatch_framework_attr",
+        "from sqp.data.pit import PointInTime\n"
+        "def run(pit, p):\n    PointInTime.touched = lambda s, a, b: []\n",
+    ),
+    (
+        "monkeypatch_polars_attr",
+        "import polars as pl\ndef run(pit, p):\n    pl.DataFrame.filter = lambda s, *a, **k: s\n",
+    ),
+    (
+        "polars_show_graph",
+        'import polars as pl\ndef run(pit, p):\n    pl.LazyFrame().show_graph(output_path="x")\n',
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("case", "source"), KNOWN_ESCAPE_CORPUS, ids=[c for c, _ in KNOWN_ESCAPE_CORPUS]
+)
+def test_known_escape_corpus_is_refused(sandbox, case, source):
+    assert violations(sandbox, source), f"escape pattern {case!r} was not refused"
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import enum\n",
+        "import functools\n",
+        "import typing\n",
+        "import collections\n",
+        "import collections.abc\n",
+        "from collections import defaultdict\n",
+        "def f(x):\n    x.a = 1\n",
+        "def f(x):\n    x.a += 1\n",
+        "def f(x):\n    del x.a\n",
+    ],
+)
+def test_removed_modules_and_attribute_mutations_are_refused(sandbox, source):
+    assert violations(sandbox, source)
