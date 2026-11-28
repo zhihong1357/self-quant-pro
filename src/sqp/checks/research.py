@@ -113,6 +113,11 @@ OTHER_NAMES = frozenset(
         "get_type_hints",
         "format",  # str.format / builtin format can traverse private attributes and stack frames
         "format_map",
+        "make_dataclass",  # builds classes with arbitrary bases/namespace dicts
+        "pickle_by_enum_name",  # returns builtins.getattr directly
+        "update_wrapper",  # copies arbitrary named attributes via getattr/setattr
+        "wraps",  # delegates to update_wrapper with caller-controlled attribute tuples
+        "help",  # pydoc imports inspect/sys/os
         "builtins",
         "bltns",
         "sys",
@@ -147,7 +152,7 @@ OTHER_NAMES = frozenset(
 _IO_NAME = re.compile(r"^(read|scan|write|sink|load|save|serialize|deserialize)(_|$)")
 # Frames and code objects reach every module's globals without a single underscore:
 # (x for x in ()).gi_frame.f_globals["__builtins__"]["open"].
-_FRAME_NAME = re.compile(r"^(gi|cr|ag|tb|f|co)_[a-z]+$")
+_FRAME_NAME = re.compile(r"^(gi|cr|ag|tb|f|co)_[a-z_]+$")
 _MISSING = object()
 
 
@@ -170,6 +175,10 @@ def _bad_object(obj: object) -> str | None:
         return f"它是不在白名单上的模块 {obj.__name__}"
     if any(obj is d for d in _DANGEROUS_OBJECTS):
         return "它是动态访问或执行的内置函数"
+    if isinstance(obj, type) and issubclass(obj, type):
+        return "它是能动态构造类的元类"
+    if obj is types.FunctionType:
+        return "它是解释器内部函数类型"
     return None
 
 
@@ -261,6 +270,8 @@ def _scan(path: str, source: str) -> list[Violation]:
                         flag(node, f"{local} 导入了两次：一个名字只能导入一次")
                     elif obj is not _MISSING:
                         bound[local] = obj
+        elif isinstance(node, ast.Match):
+            flag(node, "研究代码不能使用 match 语句（结构化模式匹配可按名字读取私有属性）")
         elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
             allowed_init_dunder = path == f"{STUDIES}__init__.py" and node.name in (
                 "__repr__",

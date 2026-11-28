@@ -263,7 +263,11 @@ def _invoke_study(
     *,
     silence_fds: bool,
 ) -> object:
-    """Run study code in its own stack frame without reference bytes or receipts in locals."""
+    """Import and run study code with captured output.
+
+    In-process isolation relies solely on the static `research-boundary` check;
+    true runtime isolation from runner locals would require a subprocess.
+    """
     study = importlib.import_module(f"{package}.{study_name}")
     with contextlib.redirect_stdout(console), contextlib.redirect_stderr(console):
         if silence_fds:

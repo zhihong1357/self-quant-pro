@@ -220,3 +220,45 @@ def test_studies_may_use_the_engine_but_only_its_own_functions(sandbox):
     assert violations(sandbox, "from sqp.research.engine import pl\n")  # a re-export
     assert violations(sandbox, "from sqp.research.engine import sharpe_standard_error\n")
     assert violations(sandbox, "from sqp.research import engine\n")
+
+
+# --- known static-boundary escape corpus (PR #29 red-team rounds 1 & 2) ------
+
+KNOWN_ESCAPE_CORPUS = [
+    ("str_format_attr", 'def run(pit, p):\n    return "{0._store}".format(pit)\n'),
+    ("str_format_map", 'def run(pit, p):\n    return "{x}".format_map({"x": 1})\n'),
+    (
+        "match_class_pattern",
+        "def run(pit, p):\n    match pit:\n        case object(_store=s):\n            return s\n",
+    ),
+    (
+        "make_dataclass_namespace",
+        "import dataclasses\n"
+        'M = dataclasses.make_dataclass("M", [], namespace={"__gt__": lambda s, o: False})\n',
+    ),
+    ("type_dynamic_class", 'def run(pit, p):\n    return type("M", (Exception,), {})\n'),
+    ("dunder_method_def", "class M:\n    def __gt__(self, other):\n        return False\n"),
+    ("metaclass_abcmeta", 'from typing import ABCMeta\nM = ABCMeta("M", (Exception,), {})\n'),
+    ("internal_function_type", "from dataclasses import FunctionType\n"),
+    (
+        "enum_pickle_by_enum_name",
+        "import enum\ndef run(pit, p):\n    g, _ = enum.pickle_by_enum_name(p, 0)\n    return g\n",
+    ),
+    (
+        "functools_update_wrapper",
+        "import functools\n"
+        'def run(pit, p):\n    functools.update_wrapper(p, pit, assigned=("_store",))\n',
+    ),
+    (
+        "functools_wraps",
+        "import functools\n"
+        'def run(pit, p):\n    return functools.wraps(pit, assigned=("_store",))(p)\n',
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("case", "source"), KNOWN_ESCAPE_CORPUS, ids=[c for c, _ in KNOWN_ESCAPE_CORPUS]
+)
+def test_known_escape_corpus_is_refused(sandbox, case, source):
+    assert violations(sandbox, source), f"escape pattern {case!r} was not refused"

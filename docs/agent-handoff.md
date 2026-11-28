@@ -2,6 +2,21 @@
 
 每次会话结束时更新这一页：最新的写在最上面，旧的往下推。只写下一个会话需要知道的事。
 
+## 2026-11-28（第三轮）· Antigravity · G2：按模型 B 第二轮复审意见修复 PR #29（R1–R5）
+
+**进展**
+- 模型 B 对 PR #29（`056b354`）完成第二轮复审：确认上一轮 13 个原版红队攻击全部被拒、统计核偏差仍为 `8.9e-14`、L4 延后合理；同时新发现 1 条致命（R1）与 4 条低危/提示（R2–R5）并提供 4 个可运行 PoC。
+- 在 `056b354` 上原样复现全部 4 个 PoC 确认存在后，全部修复并追加新提交：
+  - **R1（致命，必改）**：`src/sqp/checks/research.py` 的 `_scan` 遇到 `ast.Match`（`match` 语句）一律报违规，阻断结构化模式匹配绕过属性检查读取 `_store` / `__globals__` / 栈帧。
+  - **R2（低）+ 主动标准库审计加固**：`OTHER_NAMES` 加入 `make_dataclass` 与 `help`，同时在逐一审计 14 个白名单模块时主动发现并封堵了两个同等级逃逸入口——`enum.pickle_by_enum_name`（直接返回内置 `getattr`）和 `functools.update_wrapper` / `wraps`（可通过 `assigned=("_store",)` + property setter 读取 `pit._store`）；`_bad_object()` 主动禁用所有元类（`isinstance(obj, type) and issubclass(obj, type)`，覆盖 `typing.ABCMeta`、`enum.EnumType` 等动态建类通道）与 `types.FunctionType`；`_FRAME_NAME` 放宽至匹配含下划线的栈帧属性。
+  - **R3（提示，采纳兼顾安全与易用方案）**：`pit._utc()` 额外放行精确的 `zoneinfo.ZoneInfo("UTC")`（兼容 Polars 返回的 UTC 时间，防止 PR #30 或后续研究误踩 `TypeError` 烧掉一次性批准），仍严格拒绝 `ZoneInfo` 子类、非 UTC 时区和自定义 `tzinfo`。
+  - **R4（低）**：`PointInTime.table()` 在调用 `_authorize()` 之前先校验 `dataset` 名称合法（`^[a-z0-9][a-z0-9-]{0,63}$`）；盲复现模式下的拒绝记录仅写 `dataset` 的 `sha256:<12位>` 前缀、起止时间截断到小时，且拒绝原因不回显子小时时间戳。
+  - **R5（提示）**：修正 `run.py` 的 `_invoke_study` 注释与决策 0031 第 3 条表述，删去“独立栈帧兜底”，坦诚写明进程内隔离只靠静态 `research-boundary`、真正运行时隔离需要子进程。
+- **回归测试**：4 个第二轮 PoC 全部翻转为回归测试留在 `tests/test_redteam_pr29_round2.py`；在 `tests/test_research_boundary.py` 新增 11 条参数化“已知逃逸语料”回归测试 `test_known_escape_corpus_is_refused`（覆盖 `.format`、`.format_map`、`match` 类模式、`make_dataclass(namespace=...)`、`type(...)`、双下划线定义、`ABCMeta`、`FunctionType`、`enum.pickle_by_enum_name`、`functools.update_wrapper`、`functools.wraps`）。
+
+**下一步**
+- 交付第三轮复审包（《审查包 B-3》）供模型 B 快速核对 R1–R5；确认“可合并”且 GitHub CI 全绿后，由所有者以 merge commit 合并 PR #29，随即推进 PR #30（`studies/btc_eth_001.py` + 合成彩排，并在真实批准 H-0010 前按模型 B 建议重新评估一次 L4）。
+
 ## 2026-11-28 · Antigravity · G2：按模型 B 终审红队意见全面加固 PR #29（F1–F10、L1–L3/L5–L6、T1–T4）
 
 **进展**

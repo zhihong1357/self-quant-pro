@@ -46,6 +46,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta, timezone
 from pathlib import Path
 from types import MappingProxyType
+from zoneinfo import ZoneInfo
 
 import polars as pl
 
@@ -65,6 +66,7 @@ _PART = re.compile(r"/(?P<month>\d{4}-\d{2})\.r\d{2,}\.parquet$")
 _INPUTS_PART = re.compile(r"/(?P<month>\d{4}-\d{2})\.r(?P<part>\d{2,})\.inputs\.json$")
 _MONTH_RE = re.compile(r"^(?P<year>\d{4})-(?P<month>0[1-9]|1[0-2])$")
 _TRIAL_ID = re.compile(r"^T-\d{4,}$")
+_DATASET_ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 
 
 class AccessRefused(Exception):
@@ -460,10 +462,14 @@ def _running_main_in_actions(repo_root: Path) -> bool:
 def _utc(t: datetime, name: str) -> datetime:
     if type(t) is not datetime:
         raise TypeError(f"{name} 必须是内置 datetime，不能是子类")
-    if t.tzinfo is None:
+    tz = t.tzinfo
+    if tz is None:
         raise ValueError(f"{name} 必须带时区")
-    if type(t.tzinfo) is not timezone:
-        raise TypeError(f"{name} 的 tzinfo 必须是内置 timezone，不能是自定义子类")
+    is_std_tz = type(tz) is timezone or (type(tz) is ZoneInfo and tz.key == "UTC")
+    if not is_std_tz:
+        raise TypeError(
+            f"{name} 的 tzinfo 必须是内置 timezone 或 ZoneInfo('UTC')，不能是自定义子类"
+        )
     if t.utcoffset() is None:
         raise ValueError(f"{name} 必须带时区")
     return t.astimezone(UTC)
@@ -544,15 +550,28 @@ class PointInTime:
                 names.append(seg.name)
         return names
 
+    def _is_blind_mode(self) -> bool:
+        return self._vault_receipt is not None and self._vault_receipt.mode == "blind_replication"
+
     def _refuse(self, dataset: str, start: datetime | None, end: datetime, reason: str) -> None:
         """Record the refusal in both places, then raise. A record that could not be
         written is named in the error, so a lost audit trail never goes unnoticed."""
         env = os.environ
+        if self._is_blind_mode():
+            ds_field = f"sha256:{hashlib.sha256(dataset.encode('utf-8')).hexdigest()[:12]}"
+            start_field = (
+                start.replace(minute=0, second=0, microsecond=0).isoformat() if start else None
+            )
+            end_field = end.replace(minute=0, second=0, microsecond=0).isoformat()
+        else:
+            ds_field = dataset
+            start_field = start.isoformat() if start else None
+            end_field = end.isoformat()
         record = {
             "universe": self._universe,
-            "dataset": dataset,
-            "start": start.isoformat() if start else None,
-            "end": end.isoformat(),
+            "dataset": ds_field,
+            "start": start_field,
+            "end": end_field,
             "purpose": self._purpose,
             "reason": reason,
             "at": datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z"),
@@ -685,14 +704,15 @@ class PointInTime:
         start = None if start is None else _utc(start, "start")
         if start is not None and start > end:
             raise ValueError("start 不能晚于 end")
+        is_blind_mode = self._is_blind_mode()
         if self._max_knowable_time is not None and end > self._max_knowable_time:
             limit_iso = self._max_knowable_time.isoformat()
-            self._refuse(
-                dataset,
-                start,
-                end,
-                f"请求结束时间 {end.isoformat()} 超过允许的上限 {limit_iso}",
+            reason = (
+                f"请求结束时间超过允许的上限 {limit_iso}"
+                if is_blind_mode
+                else f"请求结束时间 {end.isoformat()} 超过允许的上限 {limit_iso}"
             )
+            self._refuse(dataset, start, end, reason)
         guarded = [s for s in self.touched(start, end) if s != "exploration"]
         if not guarded:
             return start, end
@@ -707,9 +727,6 @@ class PointInTime:
         if purpose is None or not _registered(self._repo_root, self._universe, purpose):
             reason = f"读{what}段需要本研究宇宙已合并注册的假说（purpose={purpose}）"
             self._refuse(dataset, start, end, reason)
-        is_blind_mode = (
-            self._vault_receipt is not None and self._vault_receipt.mode == "blind_replication"
-        )
         if not is_blind_mode:
             self._check_burned_exposure(purpose, guarded, dataset, start, end)
         need_vault_check = "vault" in guarded or is_blind_mode
@@ -779,6 +796,8 @@ class PointInTime:
         columns: list[str] | None = None,
     ) -> pl.DataFrame:
         """Rows whose knowable_time lies in [start, end]. Never anything after `end`."""
+        if type(dataset) is not str or not _DATASET_ID.match(dataset):
+            raise ValueError("dataset 名称不合法（仅允许小写字母、数字和连字符，1～64 字符）")
         start, end = self._authorize(dataset, start, end)
         prefix = f"{DATASET_PREFIX}{dataset}/{VERSION}/"
         keys = self._store.keys(prefix)
