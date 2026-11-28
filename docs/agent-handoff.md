@@ -2,6 +2,22 @@
 
 每次会话结束时更新这一页：最新的写在最上面，旧的往下推。只写下一个会话需要知道的事。
 
+## 2026-11-28（PR #30）· Antigravity · G2：合入 `btc_eth_001` 研究代码与合成彩排、补齐 N5 与三文件必锁（决策 0032）
+
+**进展**
+- 模型 B 对 PR #29（`3a62bbb`）第四轮终审给出 **“可合并”**，并附带应修纵深缺口 N5（Polars 凭证/目录类名）、L4 建议必锁 `stats.py` 以及第 4 节方案 B 排序提醒。所有者拍板采用“组合做法 + 选项 1”：PR #29 原样合入，本 PR（#30）落地 `btc_eth_001.py`、合成彩排、N5、三文件必锁与决策 0032。
+- **N5 防御纵深**（`src/sqp/checks/research.py`）：`OTHER_NAMES` 加入 `Catalog`、`CredentialProvider`、`CredentialProviderGCP`、`CredentialProviderAWS`、`CredentialProviderAzure`、`CredentialProviderFunction`、`DeltaLake`；第四轮 PoC 翻转为回归测试留在 `tests/test_redteam_pr29_round4.py`，已知逃逸语料扩至 17 条（`tests/test_research_boundary.py`）。
+- **L4 升级为三文件必锁**（`src/sqp/data/pit.py`）：盲复现金库批准 `code_sha256` 现在必填恰好 3 个文件——`src/sqp/research/studies/<study>.py`、`src/sqp/research/blind.py`、`src/sqp/stats.py`（gate 阶段缺 `stats.py` 报错，运行时改动任一文件在 `started.json`/`used.json` 前拒跑）。
+- **`btc_eth_001` 研究代码与合成彩排**（`src/sqp/research/studies/btc_eth_001.py`、`tests/test_btc_eth_001_rehearsal.py`）：
+  - 严格对齐 `myquant@e992b10`（`run_trial.py`）与 `H0001/v1.json` 口径，全部方法参数硬编码在研究中、仅使用允许的 9 个模块与内置类型、零属性赋值，通过 `research-boundary`（0 违规）。
+  - 合成数据端到端彩排跑通真实 `run.run_trial`（默认生产包 `sqp.research.studies`）：覆盖空信号判 `一致`（1,415 日线 `2023-01-02T16:00Z..2026-11-16T16:00Z`、2,159 小时线 `2026-08-20T01:00Z..2026-11-17T23:00Z`）、植入强信号判 `不一致`、截止日后 10 倍跳空零前视、缺口/重复/非法收盘价清洗、逐字节确定性及成本闸精算核对。
+- **方案 B 期限前移（决策 0032）**：新增 `docs/decisions/0032-btc-eth-001-study-n5-and-isolation-order.md`，把**方案 B（无凭证、断网、窄 JSON/Parquet 管道子进程隔离运行）**的硬期限前移至 **首次在烧毁数据上消耗金库批准运行 `btc_eth_001`（`H-0010`）之前**（借等 2026-11 币安月度归档的空窗期立即动工）。
+
+**下一步**
+- PR #29 合并进 `main` 后，把 `origin/main` 合并进本分支、推送并开 PR #30 交付模型 B 审查。
+- PR #30 合并后**立即启动方案 B（研究代码隔离运行子进程）**：先出提示词让模型 A 写方案 B 设计审查包 A，或直接起草决策 0033（若改 `.github/workflows/trial.yml` 在同份决策正文写明完整路径）与实现。
+- 待方案 B 合入且 2026-12 月初 2026-11 月度归档同步入桶后，再开小 PR 登记 `H-0010`、锁定三文件 `code_sha256` 的一次性金库批准与试验卡正式运行验收进 G3。
+
 ## 2026-11-28（第四轮）· Antigravity · G2：按模型 B 第三轮复审与所有者方案（A + L4 + B）加固 PR #29
 
 **进展**

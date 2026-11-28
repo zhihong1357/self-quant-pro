@@ -221,11 +221,14 @@ def test_l4_approval_code_sha256_enforced_at_gate(sandbox):
     viols = sandbox.check(base)
     assert any(v.rule == "vault-approval" and "不能包含" in v.message for v in viols)
 
-    # Exact hashes (and optional stats.py) -> passes gate cleanly.
+    # Missing stats.py -> refused now that all 3 files (study, blind.py, stats.py) are mandatory.
+    missing_stats = {k: v for k, v in good_hashes.items() if k != "src/sqp/stats.py"}
+    sandbox.write(APPROVALS, tb._ledger_text({**ap_base, "code_sha256": missing_stats}))
+    viols = sandbox.check(base)
+    assert any(v.rule == "vault-approval" and "src/sqp/stats.py" in v.message for v in viols)
+
+    # Exact 3-file hashes -> passes gate cleanly.
     sandbox.write(APPROVALS, tb._ledger_text({**ap_base, "code_sha256": good_hashes}))
-    assert not any(v.rule in ("vault-approval", "trial-card") for v in sandbox.check(base))
-    with_stats = tb._code_sha256(sandbox.root, include_stats=True)
-    sandbox.write(APPROVALS, tb._ledger_text({**ap_base, "code_sha256": with_stats}))
     assert not any(v.rule in ("vault-approval", "trial-card") for v in sandbox.check(base))
 
 
@@ -247,7 +250,21 @@ def test_l4_approval_not_bound_to_reviewed_code(blind_env, blind_studies):
     # Restoring study_file and instead modifying blind.py also refuses before started/used.
     study_file.write_text("x = 1\n")
     blind_file = root / "src/sqp/research/blind.py"
-    blind_file.write_bytes(blind_file.read_bytes() + b"\n# tampered\n")
+    orig_blind = blind_file.read_bytes()
+    blind_file.write_bytes(orig_blind + b"\n# tampered\n")
+    tb._merge(root)
+    with pytest.raises(
+        run.TrialRefused,
+        match=r"^前置检查失败，本次未开始、未消耗批准：批准锁定的代码已改动$",
+    ):
+        run.run_trial(root, store, "T-0001", package=blind_studies)
+    assert not store.exists(run.started_key("T-0001"))
+    assert not store.exists(approval_used_key(seq))
+
+    # Restoring blind.py and instead modifying stats.py also refuses before started/used.
+    blind_file.write_bytes(orig_blind)
+    stats_file = root / "src/sqp/stats.py"
+    stats_file.write_bytes(stats_file.read_bytes() + b"\n# tampered\n")
     tb._merge(root)
     with pytest.raises(
         run.TrialRefused,

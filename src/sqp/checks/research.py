@@ -102,6 +102,13 @@ OTHER_NAMES = frozenset(
         "Config",  # polars' verbose mode prints from Rust, past the console capture
         "SQLContext",
         "show_graph",  # polars LazyFrame.show_graph(output_path=...) invokes dot and writes files
+        "Catalog",  # polars Unity Catalog client makes outbound HTTPS requests
+        "CredentialProvider",  # base class for cloud credential providers
+        "CredentialProviderGCP",  # returns live runner GCP bearer token via google.auth
+        "CredentialProviderAWS",
+        "CredentialProviderAzure",
+        "CredentialProviderFunction",
+        "DeltaLake",  # preventive: Delta table scan/write entry point
         "plugins",
         "register_plugin_function",
         "ForwardRef",
