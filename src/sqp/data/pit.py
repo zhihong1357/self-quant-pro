@@ -42,6 +42,7 @@ import subprocess
 import sys
 import tempfile
 import tomllib
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta, timezone
 from pathlib import Path
@@ -67,6 +68,9 @@ _INPUTS_PART = re.compile(r"/(?P<month>\d{4}-\d{2})\.r(?P<part>\d{2,})\.inputs\.
 _MONTH_RE = re.compile(r"^(?P<year>\d{4})-(?P<month>0[1-9]|1[0-2])$")
 _TRIAL_ID = re.compile(r"^T-\d{4,}$")
 _DATASET_ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+_SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
+BLIND_CODE_FILE = "src/sqp/research/blind.py"
+STATS_CODE_FILE = "src/sqp/stats.py"
 
 
 class AccessRefused(Exception):
@@ -105,17 +109,71 @@ def _midnight(d: date) -> datetime:
     return datetime.combine(d, time(), tzinfo=UTC)
 
 
-def _git(repo_root: Path, *args: str) -> str | None:
+def _git_bytes(repo_root: Path, *args: str) -> bytes | None:
     try:
         out = subprocess.run(["git", "-C", str(repo_root), *args], capture_output=True, check=True)
     except (subprocess.CalledProcessError, FileNotFoundError):
         return None
-    return out.stdout.decode("utf-8")
+    return out.stdout
+
+
+def _git(repo_root: Path, *args: str) -> str | None:
+    raw = _git_bytes(repo_root, *args)
+    return None if raw is None else raw.decode("utf-8")
 
 
 def _on_main(repo_root: Path, relpath: str) -> str | None:
     """A file as merged on main; None if absent or git is unavailable."""
     return _git(repo_root, "show", f"{MAIN}:{relpath}")
+
+
+def _on_main_bytes(repo_root: Path, relpath: str) -> bytes | None:
+    """Raw bytes of a file as merged on main; None if absent or git is unavailable."""
+    return _git_bytes(repo_root, "show", f"{MAIN}:{relpath}")
+
+
+def approval_code_sha256_problems(record: dict, study: str | None = None) -> list[str]:
+    """Validate the `code_sha256` mapping on a blind_replication vault approval (L4)."""
+    raw = record.get("code_sha256")
+    if type(raw) is not dict:
+        return ["盲复现批准必须写明 code_sha256（锁定研究代码与 blind.py 的 SHA-256）"]
+    found: list[str] = []
+    if study:
+        study_path = f"src/sqp/research/studies/{study}.py"
+        required = {study_path, BLIND_CODE_FILE}
+        allowed = required | {STATS_CODE_FILE}
+        keys = set(raw)
+        if missing := sorted(required - keys):
+            found.append(f"盲复现批准的 code_sha256 缺少必填文件：{', '.join(missing)}")
+        if extra := sorted(keys - allowed):
+            found.append(
+                "盲复现批准的 code_sha256 只能锁定研究代码与 blind.py（可选 stats.py），"
+                f"不能包含：{', '.join(extra)}"
+            )
+    for path, digest in raw.items():
+        if type(path) is not str or type(digest) is not str or not _SHA256_HEX.match(digest):
+            found.append(f"盲复现批准的 code_sha256 中 {path!r} 的值不是 64 位小写十六进制 SHA-256")
+    return found
+
+
+def verify_approval_code_hashes(
+    record: dict,
+    read_bytes: Callable[[str], bytes | None],
+    *,
+    study: str,
+) -> list[str]:
+    """Compare raw bytes of every file locked in `code_sha256` against its SHA-256 (L4)."""
+    fmt = approval_code_sha256_problems(record, study)
+    if fmt:
+        return fmt
+    found: list[str] = []
+    for path, expected in sorted(record["code_sha256"].items()):
+        data = read_bytes(path)
+        if data is None:
+            found.append(f"批准锁定的代码文件不存在：{path}")
+        elif hashlib.sha256(data).hexdigest() != expected:
+            found.append(f"批准锁定的代码已改动：{path}")
+    return found
 
 
 def _universe_table(repo_root: Path, universe: str) -> dict:
@@ -302,6 +360,10 @@ def check_vault_approval(
         ok, reason = burned_family_allowed(repo_root, universe, hypothesis, limit_utc)
         if not ok:
             raise AccessRefused(reason)
+        if fmt_issues := approval_code_sha256_problems(record, study):
+            raise AccessRefused("；".join(fmt_issues))
+        if verify_approval_code_hashes(record, lambda p: _on_main_bytes(repo_root, p), study=study):
+            raise AccessRefused("批准锁定的代码已改动")
     elif mode != "standard":
         raise AccessRefused(f"不支持的金库批准模式：{mode!r}")
 

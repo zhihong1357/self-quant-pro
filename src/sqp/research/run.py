@@ -45,6 +45,7 @@ from sqp.data.pit import (
     VaultReceipt,
     _git,
     _on_main,
+    _on_main_bytes,
     _running_main_in_actions,
     check_vault_approval,
     consume_vault_approval,
@@ -127,7 +128,9 @@ class Finished:
     alarms: list[str] = field(default_factory=list)
 
 
-def _main_trials(repo_root: Path, strict: set[str]) -> tuple[str, list[trials.Trial]]:
+def _main_trials(
+    repo_root: Path, strict: set[str], *, verify_code_hashes: bool = True
+) -> tuple[str, list[trials.Trial]]:
     """The trials ledger on main. Ledger-wide rules are checked for every card; the
     checks against other files only for the cards in `strict`."""
     approvals = _on_main(repo_root, trials.APPROVALS) or ""
@@ -138,7 +141,13 @@ def _main_trials(repo_root: Path, strict: set[str]) -> tuple[str, list[trials.Tr
     text = _on_main(repo_root, trials.TRIALS) or ""
     if broken := ledger.verify(text):
         raise TrialRefused("main 上的试验账本损坏：" + "；".join(broken))
-    if found := trials.problems(text, lambda p: _on_main(repo_root, p), strict=strict):
+    if found := trials.problems(
+        text,
+        lambda p: _on_main(repo_root, p),
+        strict=strict,
+        read_bytes=lambda p: _on_main_bytes(repo_root, p),
+        verify_code_hashes=verify_code_hashes,
+    ):
         raise TrialRefused("main 上的试验卡有问题：" + "；".join(found))
     return text, trials.parse(text)
 
@@ -287,7 +296,7 @@ def run_trial(
 ) -> Finished:
     if not trials.TRIAL_ID.match(tid):
         raise TrialRefused(f"试验编号不对：{tid!r}")
-    text, cards = _main_trials(repo_root, {tid})
+    text, cards = _main_trials(repo_root, {tid}, verify_code_hashes=False)
     trial = next((t for t in cards if t.id == tid), None)
     if trial is None:
         raise TrialRefused(f"main 上没有试验卡 {tid}：先开 PR 登记，所有者合并之后才能跑")
@@ -342,7 +351,10 @@ def run_trial(
                     inherited=trial.inherited,
                 )
             except AccessRefused as exc:
-                raise TrialRefused(str(exc)) from None
+                msg = str(exc)
+                if msg == "批准锁定的代码已改动":
+                    raise TrialRefused(f"前置检查失败，本次未开始、未消耗批准：{msg}") from None
+                raise TrialRefused(msg) from None
     except TrialRefused:
         raise
     except Exception as exc:

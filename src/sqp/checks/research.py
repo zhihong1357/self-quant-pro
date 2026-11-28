@@ -52,17 +52,12 @@ PACKAGE = "sqp.research.studies"
 ALLOWED_MODULES = frozenset(
     {
         "__future__",
-        "collections",
-        "collections.abc",
         "dataclasses",
         "datetime",
-        "enum",
-        "functools",
         "itertools",
         "math",
         "random",
         "statistics",
-        "typing",
         "polars",
         "polars.selectors",
     }
@@ -106,6 +101,7 @@ OTHER_NAMES = frozenset(
         "sql_expr",
         "Config",  # polars' verbose mode prints from Rust, past the console capture
         "SQLContext",
+        "show_graph",  # polars LazyFrame.show_graph(output_path=...) invokes dot and writes files
         "plugins",
         "register_plugin_function",
         "ForwardRef",
@@ -114,6 +110,7 @@ OTHER_NAMES = frozenset(
         "format",  # str.format / builtin format can traverse private attributes and stack frames
         "format_map",
         "make_dataclass",  # builds classes with arbitrary bases/namespace dicts
+        "global_enum",  # writes into sys.modules[cls.__module__].__dict__
         "pickle_by_enum_name",  # returns builtins.getattr directly
         "update_wrapper",  # copies arbitrary named attributes via getattr/setattr
         "wraps",  # delegates to update_wrapper with caller-controlled attribute tuples
@@ -280,6 +277,8 @@ def _scan(path: str, source: str) -> list[Violation]:
             if node.name.startswith("__") and not allowed_init_dunder:
                 flag(node, f"研究代码不能定义双下划线名字 {node.name}")
         elif isinstance(node, ast.Attribute):
+            if isinstance(node.ctx, ast.Store | ast.Del):
+                flag(node, f"研究代码不能给属性 .{node.attr} 赋值或删除属性")
             polars_eval = node.attr == "eval" and _parent_attr(node) in ("list", "arr")
             if not polars_eval and (reason := _bad_name(node.attr)):
                 flag(node, f"不能访问 .{node.attr}：{reason}")

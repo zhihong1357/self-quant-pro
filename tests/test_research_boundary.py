@@ -14,17 +14,15 @@ from datetime import UTC, datetime
 
 import polars as pl
 import polars.selectors as cs
-from typing import Any, cast
 
 from sqp.data.pit import AccessRefused, PointInTime
 from sqp.stats import expected_max_sharpe
 
 
-
 def run(pit: PointInTime) -> dict:
     df = pit.table("um-klines-1h", end=datetime(2024, 1, 1, tzinfo=UTC))
     picked = df.select(cs.numeric()).with_columns(pl.col("close").rolling_mean(3))
-    return cast(Any, {"n": picked.height, "x": math.sqrt(2), "e": expected_max_sharpe(9, 1.75)})
+    return {"n": picked.height, "x": math.sqrt(2), "e": expected_max_sharpe(9, 1.75)}
 """
 
 
@@ -254,6 +252,25 @@ KNOWN_ESCAPE_CORPUS = [
         "import functools\n"
         'def run(pit, p):\n    return functools.wraps(pit, assigned=("_store",))(p)\n',
     ),
+    (
+        "enum_global_enum",
+        "import enum\n"
+        'def run(pit, p):\n    e = enum.Enum("K", [("X", 1)], module="builtins")\n'
+        "    enum.global_enum(e)\n",
+    ),
+    (
+        "monkeypatch_framework_attr",
+        "from sqp.data.pit import PointInTime\n"
+        "def run(pit, p):\n    PointInTime.touched = lambda s, a, b: []\n",
+    ),
+    (
+        "monkeypatch_polars_attr",
+        "import polars as pl\ndef run(pit, p):\n    pl.DataFrame.filter = lambda s, *a, **k: s\n",
+    ),
+    (
+        "polars_show_graph",
+        'import polars as pl\ndef run(pit, p):\n    pl.LazyFrame().show_graph(output_path="x")\n',
+    ),
 ]
 
 
@@ -262,3 +279,21 @@ KNOWN_ESCAPE_CORPUS = [
 )
 def test_known_escape_corpus_is_refused(sandbox, case, source):
     assert violations(sandbox, source), f"escape pattern {case!r} was not refused"
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import enum\n",
+        "import functools\n",
+        "import typing\n",
+        "import collections\n",
+        "import collections.abc\n",
+        "from collections import defaultdict\n",
+        "def f(x):\n    x.a = 1\n",
+        "def f(x):\n    x.a += 1\n",
+        "def f(x):\n    del x.a\n",
+    ],
+)
+def test_removed_modules_and_attribute_mutations_are_refused(sandbox, source):
+    assert violations(sandbox, source)

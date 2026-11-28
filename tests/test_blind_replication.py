@@ -445,6 +445,8 @@ def blind_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _blind_lake_templ
         )
     )
     (root / "src/sqp/research/studies/btc_eth_001.py").write_text("x = 1\n")
+    shutil.copy(ROOT / "src/sqp/research/blind.py", root / "src/sqp/research/blind.py")
+    shutil.copy(ROOT / "src/sqp/stats.py", root / "src/sqp/stats.py")
     for name in ("approvals.jsonl", "refusals.jsonl", "trials.jsonl"):
         (root / "registry/ledger" / name).write_text("")
     _git(root, "init", "-q", "-b", "main")
@@ -464,6 +466,15 @@ def blind_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _blind_lake_templ
     return root, store, ref, ref_bytes
 
 
+def _code_sha256(
+    root: Path, study: str = "btc_eth_001", *, include_stats: bool = False
+) -> dict[str, str]:
+    paths = [f"src/sqp/research/studies/{study}.py", "src/sqp/research/blind.py"]
+    if include_stats:
+        paths.append("src/sqp/stats.py")
+    return {p: hashlib.sha256((root / p).read_bytes()).hexdigest() for p in paths}
+
+
 def _append_blind_pair(
     root: Path,
     *,
@@ -473,6 +484,7 @@ def _append_blind_pair(
     params: dict | None = None,
     tests: int = 3,
     redo_decision: str | None = None,
+    code_sha256: dict[str, str] | None = None,
 ) -> int:
     ap = ledger.append(
         root / APPROVALS,
@@ -485,6 +497,7 @@ def _append_blind_pair(
             "study": "btc_eth_001",
             "max_knowable_time": max_kt,
             "inherited": INHERITED_SPEC,
+            "code_sha256": _code_sha256(root) if code_sha256 is None else code_sha256,
         },
     )
     card: dict[str, object] = {
@@ -587,9 +600,11 @@ def test_static_burned_family_guards_and_four_locks(sandbox):
         ),
     )
     sandbox.write("src/sqp/research/studies/btc_eth_001.py", "x = 1\n")
+    sandbox.write("src/sqp/research/blind.py", (ROOT / "src/sqp/research/blind.py").read_text())
     sandbox.write(APPROVALS, "")
     sandbox.write(trials.TRIALS, "")
     base = sandbox.commit("base")
+    valid_hashes = _code_sha256(sandbox.root)
 
     # 1. Burned family cannot submit standard confirmation trial.
     std_burned = {
@@ -654,6 +669,7 @@ def test_static_burned_family_guards_and_four_locks(sandbox):
                 "study": "btc_eth_001",
                 "max_knowable_time": MAX_KT,
                 "inherited": INHERITED_SPEC,
+                "code_sha256": valid_hashes,
             }
         ),
     )
@@ -691,6 +707,7 @@ def test_static_burned_family_guards_and_four_locks(sandbox):
                 "study": "btc_eth_001",
                 "max_knowable_time": past,
                 "inherited": INHERITED_SPEC,
+                "code_sha256": valid_hashes,
             }
         ),
     )
@@ -729,9 +746,11 @@ def test_static_blind_min_tests_three_segments_and_redo_decision(sandbox):
         ),
     )
     sandbox.write("src/sqp/research/studies/btc_eth_001.py", "x = 1\n")
+    sandbox.write("src/sqp/research/blind.py", (ROOT / "src/sqp/research/blind.py").read_text())
     sandbox.write(APPROVALS, "")
     sandbox.write(trials.TRIALS, "")
     base = sandbox.commit("base")
+    valid_hashes = _code_sha256(sandbox.root)
 
     ap1 = {
         "type": "vault",
@@ -742,6 +761,7 @@ def test_static_blind_min_tests_three_segments_and_redo_decision(sandbox):
         "study": "btc_eth_001",
         "max_knowable_time": MAX_KT,
         "inherited": INHERITED_SPEC,
+        "code_sha256": valid_hashes,
     }
     t1 = {
         "type": "trial",

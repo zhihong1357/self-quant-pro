@@ -30,7 +30,13 @@ from collections.abc import Callable, Container
 from dataclasses import dataclass
 
 from sqp import ledger
-from sqp.data.pit import burned_cutoff, find_vault_approval, parse_iso_utc
+from sqp.data.pit import (
+    approval_code_sha256_problems,
+    burned_cutoff,
+    find_vault_approval,
+    parse_iso_utc,
+    verify_approval_code_hashes,
+)
 from sqp.research import blind
 
 TRIALS = "registry/ledger/trials.jsonl"
@@ -181,17 +187,27 @@ def approval_problems(approvals: str) -> list[str]:
         if mode not in MODES:
             found.append(f"{prefix}：mode 只能是 {'/'.join(MODES)} 之一")
         elif mode == "blind_replication":
-            if not (isinstance(record.get("study"), str) and STUDY.match(record["study"])):
+            study_ok = isinstance(record.get("study"), str) and bool(STUDY.match(record["study"]))
+            if not study_ok:
                 found.append(f"{prefix}：盲复现批准必须写明合法的 study")
             if parse_iso_utc(record.get("max_knowable_time")) is None:
                 found.append(f"{prefix}：盲复现批准必须写明带 UTC 时区的 max_knowable_time")
             if not _valid_inherited_dict(record.get("inherited")):
                 found.append(f"{prefix}：盲复现批准必须写明 inherited（含 source 和 path）")
+            for issue in approval_code_sha256_problems(
+                record, record["study"] if study_ok else None
+            ):
+                found.append(f"{prefix}：{issue}")
     return found
 
 
 def problems(
-    text: str, read: Callable[[str], str | None], strict: Container[str] | None = None
+    text: str,
+    read: Callable[[str], str | None],
+    strict: Container[str] | None = None,
+    *,
+    read_bytes: Callable[[str], bytes | None] | None = None,
+    verify_code_hashes: bool = True,
 ) -> list[str]:
     """What is wrong with the trial cards in a ledger, in Chinese; empty means fine.
 
@@ -205,6 +221,11 @@ def problems(
     used_approvals: dict[int, str] = {}
     blind_refs: dict[tuple[str, str], str] = {}
     approvals = read(APPROVALS) or ""
+    raw_reader = (
+        read_bytes
+        if read_bytes is not None
+        else (lambda p: None if (s := read(p)) is None else s.encode("utf-8"))
+    )
     for line in text.splitlines():
         try:
             record = json.loads(line)
@@ -301,12 +322,28 @@ def problems(
                 bad("重跑必须和原试验的 params 完全相同")
         seen[tid] = Trial(tid, record)
         if strict is None or tid in strict:
-            found.extend(f"{tid}：{m}" for m in _runnable(tid, record, read, approvals))
+            found.extend(
+                f"{tid}：{m}"
+                for m in _runnable(
+                    tid,
+                    record,
+                    read,
+                    approvals,
+                    read_bytes=raw_reader,
+                    verify_code_hashes=verify_code_hashes,
+                )
+            )
     return found
 
 
 def _runnable(
-    tid: str, record: dict, read: Callable[[str], str | None], approvals: str
+    tid: str,
+    record: dict,
+    read: Callable[[str], str | None],
+    approvals: str,
+    *,
+    read_bytes: Callable[[str], bytes | None],
+    verify_code_hashes: bool = True,
 ) -> list[str]:
     """Checks against other files: what a card needs to be run now."""
     found = []
@@ -378,6 +415,8 @@ def _runnable(
                 found.append(
                     "盲复现批准记录的 study / max_knowable_time / inherited 与试验卡不一致"
                 )
+            if verify_code_hashes and isinstance(study, str) and STUDY.match(study):
+                found.extend(verify_approval_code_hashes(ap_rec, read_bytes, study=study))
 
     if mode == "blind_replication":
         missing_segs = [s for s in ("confirmation", "vault", "forward") if s not in planned]

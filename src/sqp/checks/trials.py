@@ -25,6 +25,9 @@ def check(repo: Repo, cfg: Governance, paths: list[str]) -> list[Violation]:
     def read(path: str) -> str | None:
         return repo.text(path) if path in files else None
 
+    def read_bytes(path: str) -> bytes | None:
+        return repo.read(path) if path in files else None
+
     # Without a base (a local `sqp check`) only the ledger-wide rules apply: whether an
     # old card could still run is not the question, and the runner checks the card it
     # runs anyway. With a base, the cards this pull request adds must be runnable.
@@ -33,6 +36,7 @@ def check(repo: Repo, cfg: Governance, paths: list[str]) -> list[Violation]:
         base = (repo.base_read(trials.TRIALS) or b"").decode("utf-8", "replace")
         new = {t.id for t in trials.parse(text)} - {t.id for t in trials.parse(base)}
     found.extend(
-        Violation("trial-card", trials.TRIALS, p) for p in trials.problems(text, read, strict=new)
+        Violation("trial-card", trials.TRIALS, p)
+        for p in trials.problems(text, read, strict=new, read_bytes=read_bytes)
     )
     return found

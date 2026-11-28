@@ -2,6 +2,33 @@
 
 每次会话结束时更新这一页：最新的写在最上面，旧的往下推。只写下一个会话需要知道的事。
 
+## 2026-11-28（第四轮）· Antigravity · G2：按模型 B 第三轮复审与所有者方案（A + L4 + B）加固 PR #29
+
+**进展**
+- 模型 B 对 PR #29（`6b5e76d`）完成第三轮复审：确认前两轮 17 个原版攻击全部被拒、R1–R5 及作者主动封堵项均成立；新发现 2 条致命（N1：`enum.global_enum` 改写任意模块与内置全局变量；N2：普通属性赋值猴子补丁 `PointInTime.touched` 与 `pl.DataFrame.filter`）与 2 条提示（N3：`LazyFrame.show_graph`；N4：明确静态边界定位），并将 L4（批准绑定代码 SHA-256）提升为本 PR 必做。
+- 所有者拍板采用 **A + L4 + B**（本 PR 完成 A 与 L4；B 作为下一里程碑不在本 PR 实现，先记入决策 0031 与本交接记录）。在 `6b5e76d` 上原样复现附录 C 全部 4 个 PoC（N1、N2a、N2b、L4）后，全部修复并追加提交：
+  - **A（结构性收紧静态边界，堵 N1/N2/N3）**：
+    - `src/sqp/checks/research.py`：从 `ALLOWED_MODULES` 删除 `enum`、`functools`、`typing`、`collections`、`collections.abc`（缩至现有研究实际用到的 9 个模块），`OTHER_NAMES` 保留原有纵深拦截项并补充 `global_enum` 与 `show_graph`；`_scan()` 全面禁止给任何属性赋值或删除属性（`ast.Attribute` 且 `ctx` 为 `ast.Store | ast.Del`，含 `=`、`+=`、`del`）。现有 `studies/` 全部 4 个文件 0 误伤。
+  - **L4（一次性批准锁定审过的代码，本 PR 落地）**：
+    - `src/sqp/data/pit.py`：新增 `_git_bytes` / `_on_main_bytes`、`approval_code_sha256_problems`、`verify_approval_code_hashes`，在 `check_vault_approval` 中按 `origin/main` 原始字节核对 `code_sha256`（必填 `src/sqp/research/studies/<study>.py` 与 `src/sqp/research/blind.py`，可选 `src/sqp/stats.py`），不符时在写 `started.json` 与消费批准前报错。
+    - `src/sqp/research/trials.py` & `src/sqp/checks/trials.py`：`approval_problems` 校验 `code_sha256` 格式与键白名单；`_runnable` 按当前 PR 原始字节比对哈希，不符在 gate 阶段拦截。
+    - `src/sqp/research/run.py`：`run_trial` 在前置阶段将 L4 哈希不符转为精确的 `TrialRefused("前置检查失败，本次未开始、未消耗批准：批准锁定的代码已改动")`，保住批准与试验卡。
+  - **N4 与方案 B 登记**：更新 `docs/decisions/0031-one-time-vault-approval-and-blind-replication.md` 第 2.3、3 条，明确静态研究边界仅为尽力而为的允许列表，不能证明不存在未发现的逃逸，并正式登记下一里程碑 **方案 B（研究代码隔离运行）**。
+  - **回归测试**：附录 C 的 4 个用例翻转成永久回归测试留在 `tests/test_redteam_pr29_round3.py`；`tests/test_research_boundary.py` 更新 `GOOD` 样例（去掉 `typing`）并在 `KNOWN_ESCAPE_CORPUS` 新增 `enum.global_enum`、框架类属性赋值、Polars 类属性赋值与 `show_graph` 等逃逸用例（共 15 条）。
+
+**已排期的下一里程碑：方案 B（研究代码子进程隔离运行，不在 PR #29 实现）**
+- **启动时间与硬期限**：PR #30（`studies/btc_eth_001.py` + 合成彩排）合并后**马上启动**，先新增一份决策记录（若改动 `.github/workflows/trial.yml` 须在同份决策正文写明完整路径以遵守规则 5）；**必须在任何新的研究代码合并进 `main` 之前完成**（期间新研究可继续在合成数据上本地开发，项目不停摆）。
+- **设计要点**（来自模型 B 第三轮第 0.3 节，写决策记录时逐项实测确认）：
+  1. **无凭证子进程**：启动前清空 `GOOGLE_APPLICATION_CREDENTIALS`、`ACTIONS_ID_TOKEN_REQUEST_TOKEN`、`ACTIONS_ID_TOKEN_REQUEST_URL`、`GITHUB_TOKEN` 等环境变量；确保子进程读不到工作目录凭证文件（用无读权限用户运行，或父进程载入凭证后删掉文件；GitHub 托管 Linux 运行器默认具备免密 `sudo`）。
+  2. **断网运行**：通过 `sudo unshare --net` 或 `docker run --network none` 彻底断网。
+  3. **窄管道数据代理**：子进程只拿到代理 `pit`，每次 `pit.table(...)` 仅把 `(dataset, start_iso, end_iso, columns)` 写成 JSON 发给父进程，由父进程用真正的 `PointInTime` 校验并读数后回传 Parquet 字节，从根上消除子类和猴子补丁。
+  4. **有界 JSON 输出与资源限制**：父进程照现有规则做严格内置类型与上下限校验；子进程 stdout/stderr 一律丢弃，并加时间与内存上限。
+  5. **验收标准**：四轮全部红队攻击用例放进子进程运行均无法触及存储桶、对照文件、网络和公开日志；现有研究结果逐字节不变。
+
+**下一步**
+- 交付第四轮复审包（《审查包 B-4》）供模型 B 做最终放行核对；确认“可合并”且 GitHub CI 全绿后，由所有者以 merge commit 合并 PR #29。
+- PR #29 合并后立即开 PR #30（`src/sqp/research/studies/btc_eth_001.py` + 合成彩排，遵守模型 B 第 4 节约束：不用已删的 5 个模块、不给任何属性赋值、把 N1/N2 纳入合成彩排）；PR #30 合并后代码冻结、签发带 `code_sha256` 的 `H-0010` 批准，并随即启动方案 B 决策与实现。
+
 ## 2026-11-28（第三轮）· Antigravity · G2：按模型 B 第二轮复审意见修复 PR #29（R1–R5）
 
 **进展**
