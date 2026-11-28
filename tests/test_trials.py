@@ -151,7 +151,11 @@ def test_the_vault_needs_the_owners_approval_by_seq(cards):
     cards.write("registry/hypotheses/H-0002.toml", vault)
     record = trial(hypothesis="H-0002", segment="vault", approval=1)
     assert any("approval" in m for m in card_problems(cards, record))
-    approval = {"type": "vault", "universe": "U9", "hypothesis": "H-0002"}
+    # Approval without trial binding or bound to another trial is refused.
+    wrong = {"type": "vault", "universe": "U9", "hypothesis": "H-0002", "trial": "T-0002"}
+    cards.write("registry/ledger/approvals.jsonl", ledger_text(wrong))
+    assert any("approval" in m for m in card_problems(cards, record))
+    approval = {"type": "vault", "universe": "U9", "hypothesis": "H-0002", "trial": "T-0001"}
     cards.write("registry/ledger/approvals.jsonl", ledger_text(approval))
     assert card_problems(cards, record) == []
 

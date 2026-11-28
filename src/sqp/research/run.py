@@ -29,14 +29,24 @@ import io
 import json
 import os
 import tomllib
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
 from sqp import ledger
-from sqp.data.pit import PointInTime, _git, _on_main, _running_main_in_actions
-from sqp.research import trials
-from sqp.research.studies import SECTIONS, VERDICTS
+from sqp.data.pit import (
+    AccessRefused,
+    PointInTime,
+    VaultReceipt,
+    _git,
+    _on_main,
+    _running_main_in_actions,
+    consume_vault_approval,
+    dataset_window_ready,
+)
+from sqp.research import blind, trials
+from sqp.research.studies import SECTIONS, VERDICTS, BlindMetrics
 from sqp.storage import ObjectExists, Store
 
 PACKAGE = "sqp.research.studies"
@@ -81,6 +91,11 @@ class Finished:
 def _main_trials(repo_root: Path, strict: set[str]) -> tuple[str, list[trials.Trial]]:
     """The trials ledger on main. Ledger-wide rules are checked for every card; the
     checks against other files only for the cards in `strict`."""
+    approvals = _on_main(repo_root, trials.APPROVALS) or ""
+    if broken_ap := ledger.verify(approvals):
+        raise TrialRefused("main 上的批准账本损坏：" + "；".join(broken_ap))
+    if bad_ap := trials.approval_problems(approvals):
+        raise TrialRefused("main 上的金库批准记录有问题：" + "；".join(bad_ap))
     text = _on_main(repo_root, trials.TRIALS) or ""
     if broken := ledger.verify(text):
         raise TrialRefused("main 上的试验账本损坏：" + "；".join(broken))
@@ -126,6 +141,8 @@ def _report(trial: trials.Trial, card: dict, sections: dict, facts: dict) -> byt
 
 
 def _outcome(result: object) -> tuple[dict, dict, str | None]:
+    if isinstance(result, BlindMetrics):
+        raise TypeError("普通试验不能返回 BlindMetrics，必须返回 Outcome")
     metrics = getattr(result, "metrics", None)
     sections = getattr(result, "sections", None)
     verdict = getattr(result, "verdict", None)
@@ -143,6 +160,32 @@ def _outcome(result: object) -> tuple[dict, dict, str | None]:
     return metrics, sections, verdict
 
 
+def _preflight_readiness(store: Store, params: dict) -> None:
+    """Verify required dataset months/symbols exist in .inputs.json before consuming approval."""
+    dataset = params.get("required_dataset")
+    symbols = params.get("required_symbols")
+    start_month = params.get("required_start_month")
+    end_month = params.get("required_end_month")
+    if not any(v is not None for v in (dataset, symbols, start_month, end_month)):
+        return
+    if not (
+        isinstance(dataset, str)
+        and isinstance(symbols, list)
+        and symbols
+        and all(isinstance(s, str) and s for s in symbols)
+        and isinstance(start_month, str)
+        and isinstance(end_month, str)
+    ):
+        raise TrialRefused(
+            "试验卡的 required_dataset / required_symbols / 月份前置检查参数格式不对"
+        )
+    missing = dataset_window_ready(store, dataset, symbols, start_month, end_month)
+    if missing:
+        preview = "、".join(missing[:6])
+        more = f" 等共 {len(missing)} 项" if len(missing) > 6 else ""
+        raise TrialRefused(f"数据还没到齐，本次未开始、未消耗批准：缺少 {preview}{more}")
+
+
 def run_trial(
     repo_root: Path,
     store: Store,
@@ -150,6 +193,7 @@ def run_trial(
     *,
     package: str = PACKAGE,
     cache_dir: Path | None = None,
+    fetch: Callable[[str], bytes] | None = None,
 ) -> Finished:
     if not trials.TRIAL_ID.match(tid):
         raise TrialRefused(f"试验编号不对：{tid!r}")
@@ -166,6 +210,21 @@ def run_trial(
     commit = (_git(repo_root, "rev-parse", "HEAD") or "").strip()
     stamp = {"trial": tid, "card_hash": trial.record["hash"], "code_commit": commit}
 
+    is_blind = trial.mode == "blind_replication"
+    ref: blind.InheritedRef | None = None
+    ref_bytes: bytes | None = None
+    limit_dt: datetime | None = None
+    if is_blind:
+        _preflight_readiness(store, trial.params)
+        inherited = trial.inherited or {}
+        ref = blind.manifest_entry(_read(repo_root), inherited.get("source"), inherited.get("path"))
+        if ref is None:
+            raise TrialRefused("盲复现引用的继承基线不在 main 的 manifest.json 中")
+        ref_bytes = blind.load_reference_bytes(ref, store, fetch=fetch)
+        limit_dt = trials._parse_iso_utc(trial.max_knowable_time)
+        if limit_dt is None:
+            raise TrialRefused("盲复现试验卡缺少合法的 max_knowable_time")
+
     _put_marker(
         store,
         started_key(tid),
@@ -179,24 +238,60 @@ def run_trial(
             {**stamp, "at": _now(), **_run_info()},
             f"{trial.hypothesis} 已经做过确认检验：每个假说只做一次",
         )
+    vault_receipt: VaultReceipt | None = None
+    if trial.segment == "vault":
+        if trial.approval is None:
+            raise TrialRefused("读金库段必须提供 approval（批准记录的 seq）")
+        try:
+            vault_receipt = consume_vault_approval(
+                repo_root,
+                store,
+                universe=universe,
+                hypothesis=trial.hypothesis,
+                trial=tid,
+                approval=trial.approval,
+                mode=trial.mode,
+                study=trial.study,
+                max_knowable_time=limit_dt,
+                inherited=trial.inherited,
+                stamp={**stamp, **_run_info()},
+            )
+        except AccessRefused as exc:
+            raise TrialRefused(str(exc)) from None
 
     params = copy.deepcopy(trial.params)  # the study may change its copy, never the card's
     pit = None
     if trial.segment != "synthetic":
         guarded = trial.segment in trials.GUARDED
+        allowed = (
+            frozenset({"confirmation", "vault", "forward"})
+            if is_blind
+            else frozenset({trial.segment} if guarded else ())
+        )
         pit = PointInTime(
             repo_root,
             store,
             universe=universe,
             purpose=trial.hypothesis if guarded else None,
             cache_dir=cache_dir,
-            allowed=frozenset({trial.segment} if guarded else ()),
+            allowed=allowed,
+            vault_receipt=vault_receipt,
+            max_knowable_time=limit_dt if is_blind else None,
         )
     console = io.StringIO()
     try:
         study = importlib.import_module(f"{package}.{trial.study}")
         with contextlib.redirect_stdout(console), contextlib.redirect_stderr(console):
-            metrics, sections, verdict = _outcome(study.run(pit, params))
+            raw_result = study.run(pit, params)
+        if is_blind:
+            if not isinstance(raw_result, BlindMetrics):
+                raise TypeError("盲复现研究必须返回 BlindMetrics")
+            assert ref is not None and ref_bytes is not None
+            compared = blind.compare(trial.study, raw_result, ref_bytes, ref, trial.params)
+            metrics, sections, verdict = _outcome(compared)
+            blind.assert_no_forbidden_keys(metrics)
+        else:
+            metrics, sections, verdict = _outcome(raw_result)
         inputs = dict(pit.inputs) if pit is not None else {}
         # allow_nan=False: NaN and Infinity are not JSON; a study must say what it means
         result = json.dumps(
@@ -214,12 +309,15 @@ def run_trial(
         report = _report(trial, card, sections, facts)
     except Exception as exc:
         # The exception's message may carry numbers, so only its type is stored and
-        # shown; the run still counts as a trial (decision 0025).
+        # shown; the run still counts as a trial (decision 0025). Blind replications
+        # discard console output completely so raw numbers never land in the bucket.
         failed = {**stamp, "at": _now(), "error": type(exc).__name__, **_run_info()}
         store.put(f"{LEDGER_PREFIX}{tid}.failed.json", ledger.canonical(failed), content_type=JSON)
-        _keep_console(store, tid, console)
+        if not is_blind:
+            _keep_console(store, tid, console)
         raise
-    _keep_console(store, tid, console)
+    if not is_blind:
+        _keep_console(store, tid, console)
     store.put(f"{DERIVED_PREFIX}{tid}/result.json", result, content_type=JSON)
     store.put(
         f"{DERIVED_PREFIX}{tid}/report.md", report, content_type="text/markdown; charset=utf-8"

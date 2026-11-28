@@ -51,16 +51,20 @@ import polars as pl
 
 from sqp import ledger
 from sqp.data.build import DATASET_PREFIX, VERSION, checksum_key
-from sqp.storage import Store
+from sqp.storage import ObjectExists, Store
 
 MAIN = "refs/remotes/origin/main"
 APPROVALS = "registry/ledger/approvals.jsonl"
+APPROVALS_USED_PREFIX = "ledger/approvals/"
 REFUSALS = "registry/ledger/refusals.jsonl"
 REFUSALS_PREFIX = "ledger/refusals/"
 READABLE_STATUSES = frozenset({"registered", "confirmed"})
 SEGMENT_NAMES = ("exploration", "confirmation", "vault", "forward")
 GUARDED_EVENTS = frozenset({"schedule", "workflow_dispatch"})  # as in the bucket's identity rule
 _PART = re.compile(r"/(?P<month>\d{4}-\d{2})\.r\d{2,}\.parquet$")
+_INPUTS_PART = re.compile(r"/(?P<month>\d{4}-\d{2})\.r(?P<part>\d{2,})\.inputs\.json$")
+_MONTH_RE = re.compile(r"^(?P<year>\d{4})-(?P<month>0[1-9]|1[0-2])$")
+_TRIAL_ID = re.compile(r"^T-\d{4,}$")
 
 
 class AccessRefused(Exception):
@@ -76,6 +80,23 @@ class Segment:
     name: str
     start: datetime  # inclusive
     end: datetime | None  # exclusive; None = open-ended
+
+
+@dataclass(frozen=True)
+class VaultReceipt:
+    """One-time runtime receipt issued only after the store records approval consumption."""
+
+    approval: int
+    trial: str
+    universe: str
+    hypothesis: str
+    nonce: str
+    mode: str = "standard"
+    max_knowable_time: datetime | None = None
+
+
+def approval_used_key(seq: int) -> str:
+    return f"{APPROVALS_USED_PREFIX}{seq}.used.json"
 
 
 def _midnight(d: date) -> datetime:
@@ -95,14 +116,18 @@ def _on_main(repo_root: Path, relpath: str) -> str | None:
     return _git(repo_root, "show", f"{MAIN}:{relpath}")
 
 
-def load_segments(repo_root: Path, universe: str) -> tuple[Segment, ...]:
-    """The universe's segments as merged on main. Without them nothing can be read."""
+def _universe_table(repo_root: Path, universe: str) -> dict:
     if not re.fullmatch(r"U\d+", universe):
         raise ValueError(f"研究宇宙的名字不对：{universe!r}")
     text = _on_main(repo_root, f"registry/universes/{universe}.toml")
     if text is None:
         raise AccessRefused(f"main 上没有研究宇宙 {universe}，或者 git 不可用：什么都不读")
-    table = tomllib.loads(text)["segments"]
+    return tomllib.loads(text)
+
+
+def load_segments(repo_root: Path, universe: str) -> tuple[Segment, ...]:
+    """The universe's segments as merged on main. Without them nothing can be read."""
+    table = _universe_table(repo_root, universe)["segments"]
     segments = []
     for name in SEGMENT_NAMES:
         end = table[name].get("end")
@@ -117,32 +142,232 @@ def load_segments(repo_root: Path, universe: str) -> tuple[Segment, ...]:
     return tuple(segments)
 
 
-def _registered(repo_root: Path, universe: str, hypothesis: str) -> bool:
+def _hypothesis_card(repo_root: Path, hypothesis: str) -> dict | None:
     if not re.fullmatch(r"H-\d{4}", hypothesis):
-        return False
+        return None
     text = _on_main(repo_root, f"registry/hypotheses/{hypothesis}.toml")
     if text is None:
-        return False
+        return None
     try:
-        card = tomllib.loads(text)
+        return tomllib.loads(text)
     except tomllib.TOMLDecodeError:
+        return None
+
+
+def _registered(repo_root: Path, universe: str, hypothesis: str) -> bool:
+    card = _hypothesis_card(repo_root, hypothesis)
+    if card is None:
         return False
     return card.get("status") in READABLE_STATUSES and card.get("universe") == universe
 
 
-def _vault_approved(repo_root: Path, universe: str, hypothesis: str) -> bool:
+def _parse_iso_utc(raw: object) -> datetime | None:
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None or dt.utcoffset() is None:
+        return None
+    return dt.astimezone(UTC)
+
+
+def _vault_approval_record(
+    repo_root: Path,
+    universe: str,
+    hypothesis: str,
+    *,
+    trial: str,
+    approval: int,
+) -> dict | None:
+    if (
+        isinstance(approval, bool)
+        or not isinstance(approval, int)
+        or approval < 1
+        or not _TRIAL_ID.match(trial)
+    ):
+        return None
     text = _on_main(repo_root, APPROVALS)
     if not text or ledger.verify(text):
-        return False  # nothing merged, or a broken chain: approves nothing
+        return None  # nothing merged, or a broken chain: approves nothing
     for line in text.splitlines():
         record = json.loads(line)
+        if record.get("seq") == approval:
+            if (
+                record.get("type") == "vault"
+                and record.get("universe") == universe
+                and record.get("hypothesis") == hypothesis
+                and record.get("trial") == trial
+            ):
+                return record
+            return None
+    return None
+
+
+def burned_family_allowed(
+    repo_root: Path,
+    universe: str,
+    hypothesis: str,
+    max_knowable_time: datetime,
+) -> tuple[bool, str]:
+    """Check on origin/main that `hypothesis`'s family is burned and cutoff is within bounds."""
+    card = _hypothesis_card(repo_root, hypothesis)
+    if card is None:
+        return False, f"main 上没有假说卡 {hypothesis}"
+    family = card.get("family")
+    exposure = _universe_table(repo_root, universe).get("exposure", {})
+    burned = exposure.get("families_burned") or []
+    through = exposure.get("burned_through")
+    if family not in burned:
+        return False, f"假说族 {family!r} 不在 {universe} 的 families_burned 中，不能走盲复现通道"
+    if not isinstance(through, date):
+        return False, f"{universe} 的 exposure.burned_through 缺失或不是日期"
+    cutoff = _midnight(through + timedelta(days=1))
+    if _utc(max_knowable_time, "max_knowable_time") >= cutoff:
+        return (
+            False,
+            f"盲复现时间上限 {max_knowable_time.isoformat()} 超过了 burned_through ({through})",
+        )
+    return True, ""
+
+
+def consume_vault_approval(
+    repo_root: Path,
+    store: Store,
+    *,
+    universe: str,
+    hypothesis: str,
+    trial: str,
+    approval: int,
+    mode: str = "standard",
+    study: str | None = None,
+    max_knowable_time: datetime | None = None,
+    inherited: dict | None = None,
+    stamp: dict | None = None,
+) -> VaultReceipt:
+    """Verify a trial-bound vault approval on origin/main and atomically consume it once."""
+    if not _running_main_in_actions(repo_root):
+        raise AccessRefused("读金库段只能在 GitHub Actions 里、由定时或手动触发、运行 main 的代码")
+    if not _registered(repo_root, universe, hypothesis):
+        raise AccessRefused(f"读金库段需要本研究宇宙已合并注册的假说（{hypothesis}）")
+    record = _vault_approval_record(repo_root, universe, hypothesis, trial=trial, approval=approval)
+    if record is None:
+        raise AccessRefused(
+            f"金库批准 #{approval} 不存在，或与 {universe}/{hypothesis}/{trial} 不匹配"
+        )
+    rec_mode = record.get("mode", "standard")
+    if rec_mode != mode:
+        raise AccessRefused(f"金库批准 #{approval} 的模式是 {rec_mode!r}，不是 {mode!r}")
+
+    limit_utc: datetime | None = None
+    if mode == "blind_replication":
+        if max_knowable_time is None or not study or not inherited:
+            raise AccessRefused(
+                "盲复现消费金库批准时必须提供 study、max_knowable_time 和 inherited"
+            )
+        limit_utc = _utc(max_knowable_time, "max_knowable_time")
+        rec_limit = _parse_iso_utc(record.get("max_knowable_time"))
         if (
-            record.get("type") == "vault"
-            and record.get("universe") == universe
-            and record.get("hypothesis") == hypothesis
+            record.get("study") != study
+            or rec_limit != limit_utc
+            or record.get("inherited") != inherited
         ):
-            return True
-    return False
+            raise AccessRefused(f"金库批准 #{approval} 的盲复现范围与试验卡不一致")
+        ok, reason = burned_family_allowed(repo_root, universe, hypothesis, limit_utc)
+        if not ok:
+            raise AccessRefused(reason)
+    elif mode != "standard":
+        raise AccessRefused(f"不支持的金库批准模式：{mode!r}")
+
+    nonce = secrets.token_hex(16)
+    doc: dict[str, object] = {
+        **(stamp or {}),
+        "approval": approval,
+        "trial": trial,
+        "universe": universe,
+        "hypothesis": hypothesis,
+        "mode": mode,
+        "nonce": nonce,
+        "at": datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z"),
+    }
+    if limit_utc is not None:
+        doc["max_knowable_time"] = limit_utc.isoformat().replace("+00:00", "Z")
+    try:
+        store.put(
+            approval_used_key(approval),
+            ledger.canonical(doc),
+            content_type="application/json; charset=utf-8",
+        )
+    except ObjectExists:
+        raise AccessRefused(
+            f"金库批准 #{approval} 已经使用过：每份批准只对一张试验卡有效，用完即作废"
+        ) from None
+
+    return VaultReceipt(
+        approval=approval,
+        trial=trial,
+        universe=universe,
+        hypothesis=hypothesis,
+        nonce=nonce,
+        mode=mode,
+        max_knowable_time=limit_utc,
+    )
+
+
+def _months_between(start_month: str, end_month: str) -> list[str]:
+    m1, m2 = _MONTH_RE.match(start_month), _MONTH_RE.match(end_month)
+    if m1 is None or m2 is None or start_month > end_month:
+        raise ValueError(f"月份范围不合法：{start_month!r} ~ {end_month!r}")
+    year, month = int(m1["year"]), int(m1["month"])
+    end_y, end_m = int(m2["year"]), int(m2["month"])
+    months = []
+    while (year, month) <= (end_y, end_m):
+        months.append(f"{year:04d}-{month:02d}")
+        month += 1
+        if month == 13:
+            year, month = year + 1, 1
+    return months
+
+
+def dataset_window_ready(
+    store: Store,
+    dataset: str,
+    symbols: list[str] | tuple[str, ...],
+    start_month: str,
+    end_month: str,
+) -> list[str]:
+    """Check committed .inputs.json metadata only (never parquet rows) for required months/symbols.
+
+    Returns a list of missing `YYYY-MM:SYMBOL` entries; empty means ready.
+    """
+    prefix = f"{DATASET_PREFIX}{dataset}/{VERSION}/"
+    keys = store.keys(prefix)
+    present = set(keys)
+    by_month: dict[str, set[str]] = {}
+    for key in keys:
+        match = _INPUTS_PART.search(key)
+        if not match:
+            continue
+        stem = key.removesuffix(".inputs.json")
+        parquet_key = f"{stem}.parquet"
+        if parquet_key not in present or checksum_key(parquet_key) not in present:
+            continue
+        try:
+            doc = json.loads(store.get(key))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        covered = by_month.setdefault(match["month"], set())
+        for item in doc.get("inputs", []):
+            if isinstance(item, dict) and isinstance(item.get("symbol"), str):
+                covered.add(item["symbol"])
+    missing = []
+    for month in _months_between(start_month, end_month):
+        covered = by_month.get(month, set())
+        for sym in symbols:
+            if sym not in covered:
+                missing.append(f"{month}:{sym}")
+    return missing
 
 
 def _running_main_in_actions(repo_root: Path) -> bool:
@@ -186,6 +411,8 @@ class PointInTime:
         purpose: str | None = None,
         cache_dir: Path | None = None,
         allowed: frozenset[str] | None = None,
+        vault_receipt: VaultReceipt | None = None,
+        max_knowable_time: datetime | None = None,
     ) -> None:
         self._repo_root = repo_root
         self._store = store
@@ -196,6 +423,18 @@ class PointInTime:
         # trial runner sets it from the trial card, so a card registered for one
         # segment cannot read another (decision 0025).
         self._allowed = None if allowed is None else frozenset(allowed)
+        self._vault_receipt = vault_receipt
+        self._max_knowable_time = (
+            None if max_knowable_time is None else _utc(max_knowable_time, "max_knowable_time")
+        )
+        multi_guarded = self._allowed is not None and len(self._allowed - {"exploration"}) > 1
+        if multi_guarded and (
+            vault_receipt is None
+            or vault_receipt.mode != "blind_replication"
+            or self._max_knowable_time is None
+            or self._max_knowable_time != vault_receipt.max_knowable_time
+        ):
+            raise AccessRefused("跨多个受保护段读取只对带一次性凭证和截止时间的盲复现开放")
         self._segments = load_segments(repo_root, universe)
         self._inputs: dict[str, str] = {}  # object key -> SHA-256 of the bytes read
 
@@ -261,6 +500,52 @@ class PointInTime:
             raise AccessRefused(f"{reason}（{message}）")
         raise AccessRefused(reason)
 
+    def _verify_vault_receipt(self, purpose: str) -> str | None:
+        receipt = self._vault_receipt
+        if receipt is None:
+            return f"读金库段需要所有者已合并的一次性批准记录及消费凭证（{APPROVALS}）"
+        if receipt.universe != self._universe or receipt.hypothesis != purpose:
+            return "金库消费凭证与当前研究宇宙或假说不匹配"
+        record = _vault_approval_record(
+            self._repo_root,
+            self._universe,
+            purpose,
+            trial=receipt.trial,
+            approval=receipt.approval,
+        )
+        if record is None or record.get("mode", "standard") != receipt.mode:
+            return f"main 上找不到与凭证匹配的一次性金库批准 #{receipt.approval}"
+        marker_key = approval_used_key(receipt.approval)
+        if not self._store.exists(marker_key):
+            return f"存储桶缺少金库批准 #{receipt.approval} 的已消费标记"
+        try:
+            marker = json.loads(self._store.get(marker_key))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return f"金库批准 #{receipt.approval} 的已消费标记损坏"
+        if (
+            marker.get("approval") != receipt.approval
+            or marker.get("trial") != receipt.trial
+            or marker.get("universe") != self._universe
+            or marker.get("hypothesis") != purpose
+            or marker.get("mode") != receipt.mode
+            or marker.get("nonce") != receipt.nonce
+        ):
+            return f"金库批准 #{receipt.approval} 的已消费标记与本次运行凭证不一致"
+        if receipt.mode == "blind_replication":
+            rec_limit = _parse_iso_utc(record.get("max_knowable_time"))
+            if (
+                self._max_knowable_time is None
+                or self._max_knowable_time != receipt.max_knowable_time
+                or rec_limit != self._max_knowable_time
+            ):
+                return "盲复现缺少有效的时间截断上限，或与批准记录不一致"
+            ok, reason = burned_family_allowed(
+                self._repo_root, self._universe, purpose, self._max_knowable_time
+            )
+            if not ok:
+                return reason
+        return None
+
     def _authorize(
         self, dataset: str, start: datetime | None, end: datetime
     ) -> tuple[datetime | None, datetime]:
@@ -269,6 +554,14 @@ class PointInTime:
         start = None if start is None else _utc(start, "start")
         if start is not None and start > end:
             raise ValueError("start 不能晚于 end")
+        if self._max_knowable_time is not None and end > self._max_knowable_time:
+            limit_iso = self._max_knowable_time.isoformat()
+            self._refuse(
+                dataset,
+                start,
+                end,
+                f"请求结束时间 {end.isoformat()} 超过允许的上限 {limit_iso}",
+            )
         guarded = [s for s in self.touched(start, end) if s != "exploration"]
         if not guarded:
             return start, end
@@ -283,8 +576,11 @@ class PointInTime:
         if purpose is None or not _registered(self._repo_root, self._universe, purpose):
             reason = f"读{what}段需要本研究宇宙已合并注册的假说（purpose={purpose}）"
             self._refuse(dataset, start, end, reason)
-        if "vault" in guarded and not _vault_approved(self._repo_root, self._universe, purpose):
-            self._refuse(dataset, start, end, f"读金库段需要所有者已合并的批准记录（{APPROVALS}）")
+        need_vault_check = "vault" in guarded or (
+            self._vault_receipt is not None and self._vault_receipt.mode == "blind_replication"
+        )
+        if need_vault_check and (reason := self._verify_vault_receipt(purpose)):
+            self._refuse(dataset, start, end, reason)
         return start, end
 
     def _expected_sha256(self, key: str, keys: set[str]) -> str:

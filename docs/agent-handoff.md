@@ -2,6 +2,29 @@
 
 每次会话结束时更新这一页：最新的写在最上面，旧的往下推。只写下一个会话需要知道的事。
 
+## 2026-11-27 · Antigravity · G2：东京录制跑通；一次性金库批准与四联锁盲复现框架（决策 0031）
+
+**进展**
+- 所有者发回谷歌云东京区最新录制日志（代码 `09ed6c6d`）：五个数据集（`exchange-info`、`premium-index`、`funding`、`klines-30m`、`open-interest-30m`）全部写入成功，退出码 0，无 403；本次写入约 2.3 MB，存储桶合计约 3,492.7 MB / 4,500 MB。录制任务正式跑通。
+- 所有者引入“四方流水线”：总控出提示词 → 模型 A 起草《审查包 A》 → 总控对照源码一审挑刺、补充并落地 PR 与《审查包 B》 → 模型 B 独立终审 → 总控修完后合并。
+- 一审模型 A 的《审查包 A》时，对照 `self-quant-pro@09ed6c6` 和 `myquant` 历史提交 `e992b10`/`feb6a07` 源码抓出 7 处关键偏差并全部修正：
+  1. 本仓库 `registry/inherited/myquant/research/btc-eth-001/trials.jsonl` 按决策 0011 剥离了数值结果（只有 6 个元数据键），不能直接读；但 `registry/inherited/manifest.json` 已锁定上游完整文件的提交号（`feb6a07`）、字节数（7,918）与 SHA-256。改为框架层按 `manifest.json` 验哈希加载（优先读私有存储缓存 `raw/gen2/...`，离线测试零联网）。
+  2. 核对真正跑出 `btc-eth-001` 的 Python 源码（`myquant@e992b10` 的 `run_trial.py`、`okx.py`、`panel.py`、`lead_lag.py`、`hac.py`、`walk_forward.py`、`bootstrap.py`），修正了 5 处统计口径：OKX 日线是 16:00 UTC **开盘锚定**；因子天然滞后；`BTC→SOL` 控制滞后 `ETH`；Newey–West HAC 用固定滞后（5/12）、不乘小样本自由度因子、双侧正态 p 值；自助法用于成本闸净日收益均值检验，总裁决由 4 条准则共同决定。
+  3. 因 `gate / rules` 用 `main` 的 `research-boundary` 查 PR，必须先合入框架与 `sqp.stats` 纯 Python 统计原语（本次 PR），下一个 PR 再合入 `studies/btc_eth_001.py` 和合成数据彩排。
+  4. 堵住现行 `run.py` 的 `console.log` 侧信道：盲复现模式丢弃控制台输出，绝不落盘 `console.log`；`BlindMetrics.quality` 实施严格字段与类型白名单；禁止通过 `params` 放宽门槛（严格守住 `docs/lineage.md` 的 1.0 标准误与 5% 样本差上限）。
+  5. 融合现有仓库机制：复用 `approvals.jsonl` 的 `seq`、`Store.put()` 的原子防覆写、`derived/trials/<T>/` 路径，新增单卡绑定 `trial` 字段和存储桶一次性消费标记 `ledger/approvals/<seq>.used.json`（含随机 `nonce`），并在消耗批准前仅靠 `.inputs.json` 检查数据月度分块就绪（不读行情、未就绪不烧批准）。
+- 本次 PR（分支 `antigravity/g2-blind-replication-framework`）：决策 0031、`src/sqp/data/pit.py`、`src/sqp/research/trials.py`、`src/sqp/research/run.py`、`src/sqp/research/blind.py`、`src/sqp/stats.py`、`src/sqp/research/studies/__init__.py`、`src/sqp/checks/research.py`、`src/sqp/checks/trials.py`，以及新增安全/统计/盲复现测试。零冻结文件修改、零新增依赖。
+
+**下一步**
+- 等模型 B 审查本次 PR 并按有效意见修完合并后：
+  1. 紧接开第二个 PR：新增 `src/sqp/research/studies/btc_eth_001.py`（16:00 UTC 日线聚合 + 完整 6 步复现计算）与 `scripts/rehearsal/` 端到端合成数据彩排；
+  2. 等 2026-12-02～04 Binance 发布 2026-11 月度归档并同步整理进存储桶后，开小 PR 追加假说卡 `H-0010`、一次性批准与试验卡正式运行，完成迁移验收 A 并写 G2 验收决策进 G3；
+  3. 同步推进录制断更与存储桶空间预警，以及决策 0028 的 U2 美股 ETF 规划。
+
+**踩到的坑**
+- `myquant@feb6a07` 前端 TypeScript 的 `leadLag.ts` 和历史提交 `e992b10` 真正跑出 `btc-eth-001` 账本的 Python 统计核口径不同（HAC 带宽、小样本缩放、p 值分布、自助法对象都不同）。复现前代研究时必须追到真正产出账本的那次提交。
+- `gate / rules` 永远拿 `main` 上的 `research-boundary` 查 PR，新增共享函数和研究代码不能塞进同一个 PR。
+
 ## 2026-11-26（深夜）· Claude（Opus 5.5）· G2：录制任务遇到 Binance 防火墙（403）
 
 **进展**

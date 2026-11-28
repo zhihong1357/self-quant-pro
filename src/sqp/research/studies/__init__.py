@@ -41,3 +41,22 @@ class Outcome:
     metrics: dict  # name -> number, string, bool or None; stays in the private bucket
     sections: dict  # every name in SECTIONS -> text; "不适用：…" is a valid text
     verdict: str | None = None  # one of VERDICTS, printed in the public log
+
+
+@dataclass(frozen=True, repr=False)
+class BlindMetrics:
+    """In-memory raw estimates from a blind replication study (decision 0031).
+
+    The runner hands this directly to the framework-side blind comparator and
+    discards it; its string forms are redacted so logs or tracebacks never print
+    raw numbers from guarded segments.
+    """
+
+    values: dict
+    quality: dict
+
+    def __repr__(self) -> str:
+        return "<BlindMetrics redacted>"
+
+    def __str__(self) -> str:
+        return "<BlindMetrics redacted>"

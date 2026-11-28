@@ -25,6 +25,9 @@ from sqp.data.pit import (
     AccessRefused,
     IntegrityError,
     PointInTime,
+    VaultReceipt,
+    approval_used_key,
+    consume_vault_approval,
 )
 from sqp.storage import LocalStore
 
@@ -116,9 +119,17 @@ def register(root: Path, hypothesis: str, status: str = "registered", universe: 
     (root / "registry" / "hypotheses" / f"{hypothesis}.toml").write_text(card)
 
 
-def approve(root: Path, hypothesis: str, kind: str = "vault", universe: str = "U1") -> None:
-    record = {"type": kind, "universe": universe, "hypothesis": hypothesis}
-    ledger.append(root / APPROVALS, record)
+def approve(
+    root: Path,
+    hypothesis: str,
+    kind: str = "vault",
+    universe: str = "U1",
+    trial: str | None = "T-0001",
+) -> int:
+    record: dict[str, object] = {"type": kind, "universe": universe, "hypothesis": hypothesis}
+    if trial is not None:
+        record["trial"] = trial
+    return int(ledger.append(root / APPROVALS, record)["seq"])
 
 
 def refusals(root: Path) -> list[str]:
@@ -266,23 +277,49 @@ def test_forward_alone_needs_a_registration_but_no_vault_approval(
 # --- the vault ----------------------------------------------------------------
 
 
-def test_vault_needs_a_merged_owner_approval(repo: Path, store: LocalStore, actions: None) -> None:
+def test_vault_needs_a_merged_one_time_owner_approval(
+    repo: Path, store: LocalStore, actions: None
+) -> None:
     register(repo, "H-0001")
     merge(repo)
     pit = PointInTime(repo, store, purpose="H-0001")
     with pytest.raises(AccessRefused, match="批准"):
         pit.table(DATASET, end=utc(2025, 11, 1, 2))
-    approve(repo, "H-0001")
+    seq = approve(repo, "H-0001", trial="T-0001")
     with pytest.raises(AccessRefused):  # appended locally, not merged yet
-        pit.table(DATASET, end=utc(2025, 11, 1, 2))
+        consume_vault_approval(
+            repo, store, universe="U1", hypothesis="H-0001", trial="T-0001", approval=seq
+        )
     merge(repo)
-    rows = pit.table(DATASET, end=utc(2025, 11, 1, 2), start=utc(2025, 10, 31, 23))
+    with pytest.raises(AccessRefused, match="批准"):  # merged, but not consumed yet
+        pit.table(DATASET, end=utc(2025, 11, 1, 2))
+    receipt = consume_vault_approval(
+        repo, store, universe="U1", hypothesis="H-0001", trial="T-0001", approval=seq
+    )
+    assert store.exists(approval_used_key(seq))
+    authed = PointInTime(repo, store, purpose="H-0001", vault_receipt=receipt)
+    rows = authed.table(DATASET, end=utc(2025, 11, 1, 2), start=utc(2025, 10, 31, 23))
     assert rows.height == 4
+    # Second read within the same authorized run succeeds; consuming the approval again fails.
+    assert authed.table(DATASET, end=utc(2025, 11, 1, 2), start=utc(2025, 11, 1, 1)).height == 2
+    with pytest.raises(AccessRefused, match="已经使用过"):
+        consume_vault_approval(
+            repo, store, universe="U1", hypothesis="H-0001", trial="T-0001", approval=seq
+        )
     assert len(refusals(repo)) == 2
 
 
 @pytest.mark.parametrize(
-    "case", ["other hypothesis", "other type", "other universe", "broken chain"]
+    "case",
+    [
+        "other hypothesis",
+        "other type",
+        "other universe",
+        "other trial",
+        "missing trial",
+        "broken chain",
+        "forged nonce",
+    ],
 )
 def test_approvals_that_do_not_count(
     repo: Path, store: LocalStore, actions: None, case: str
@@ -290,18 +327,38 @@ def test_approvals_that_do_not_count(
     register(repo, "H-0001")
     register(repo, "H-0002")
     if case == "other hypothesis":
-        approve(repo, "H-0002")
+        seq = approve(repo, "H-0002", trial="T-0001")
     elif case == "other type":
-        approve(repo, "H-0001", kind="confirmation")
+        seq = approve(repo, "H-0001", kind="confirmation", trial="T-0001")
     elif case == "other universe":
-        approve(repo, "H-0001", universe="U2")
-    else:
-        approve(repo, "H-0001")
+        seq = approve(repo, "H-0001", universe="U2", trial="T-0001")
+    elif case == "other trial":
+        seq = approve(repo, "H-0001", trial="T-0002")
+    elif case == "missing trial":
+        seq = approve(repo, "H-0001", trial=None)
+    elif case == "broken chain":
+        seq = approve(repo, "H-0001", trial="T-0001")
         path = repo / APPROVALS
         path.write_text(path.read_text().replace('"U1"', '"U2"'))  # edit a sealed record
+    else:
+        seq = approve(repo, "H-0001", trial="T-0001")
     merge(repo)
-    with pytest.raises(AccessRefused):
-        PointInTime(repo, store, purpose="H-0001").table(DATASET, end=utc(2025, 11, 2))
+    if case == "forged nonce":
+        consume_vault_approval(
+            repo, store, universe="U1", hypothesis="H-0001", trial="T-0001", approval=seq
+        )
+        forged = VaultReceipt(
+            approval=seq, trial="T-0001", universe="U1", hypothesis="H-0001", nonce="wrong"
+        )
+        with pytest.raises(AccessRefused, match="不一致"):
+            PointInTime(repo, store, purpose="H-0001", vault_receipt=forged).table(
+                DATASET, end=utc(2025, 11, 2)
+            )
+    else:
+        with pytest.raises(AccessRefused):
+            consume_vault_approval(
+                repo, store, universe="U1", hypothesis="H-0001", trial="T-0001", approval=seq
+            )
 
 
 def test_refusals_are_also_kept_in_the_store(repo: Path, store: LocalStore) -> None:
